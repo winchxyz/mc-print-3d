@@ -315,10 +315,10 @@ class ModelResolver:
                 rs.kind = "builtin_entity"
             elif any(i.model.loader for i in rs.instances):
                 rs.kind = "custom_loader"
-            elif is_air_like(state.path) or state.namespace == "minecraft" or rs.particle is None:
+            elif is_air_like(state.path) or rs.particle is None:
                 rs.kind = "empty"
             else:
-                # mod block with a particle texture but no JSON geometry: almost always a block-entity renderer
+                # a particle texture but no JSON geometry: almost always a block-entity renderer
                 rs.kind = "builtin_entity"
         return rs
 
@@ -328,12 +328,13 @@ class ModelResolver:
         if isinstance(variants, dict) and variants:
             if bs.get("forge_marker") == 1 or _looks_like_forge_variants(variants):
                 return self._forge_variants(bs, variants, props)
-            key = _pick_variant(variants, props)
+            key = _pick_variant(variants, props, state.path)
             if key is None:
                 return []
             return self._apply(variants[key])
         multipart = bs.get("multipart")
         if isinstance(multipart, list):
+            props = _with_multipart_defaults(multipart, props, state)
             out: list[ModelInstance] = []
             for part in multipart:
                 if not isinstance(part, dict):
@@ -341,6 +342,14 @@ class ModelResolver:
                 cond = part.get("when")
                 if cond is None or _eval_condition(cond, props):
                     out.extend(self._apply(part.get("apply")))
+            if not out:
+                # nothing matched (e.g. a vine with every side false): show the first conditional part
+                for part in multipart:
+                    if isinstance(part, dict) and part.get("when") is not None:
+                        out.extend(self._apply(part.get("apply")))
+                        if out:
+                            rs.warnings.append("no multipart condition matched; used the first part")
+                            break
             return out
         rs.warnings.append("blockstate has neither variants nor multipart")
         return []
@@ -426,23 +435,46 @@ def _parse_variant_key(key: str) -> dict[str, str]:
     return out
 
 
-def _pick_variant(variants: dict, props: dict[str, str]) -> Optional[str]:
-    """Best matching variant key: no contradictions, most matched properties, else fewest contradictions."""
+_DEFAULT_VALUES = {"north", "north_south", "y", "bottom", "lower", "false", "none", "0", "1", "straight", "floor",
+                   "wall", "single", "left", "up", "small", "top_left", "level", "empty", "compare", "unstable"}
+
+
+def _default_facing(path: str) -> str:
+    """Game default for 6-way 'facing' when the state does not say: rods and buds point up, hoppers down."""
+    if path.endswith("_rod") or path.endswith("_bud") or path.endswith("amethyst_cluster") or path.endswith("_cluster"):
+        return "up"
+    if path.endswith("hopper"):
+        return "down"
+    return "north"
+
+
+def _pick_variant(variants: dict, props: dict[str, str], path: str = "") -> Optional[str]:
+    """Best matching variant key: no contradictions, most matched properties, then game-like defaults.
+
+    Properties the state does not carry (legacy files, bare block names) prefer the game's default
+    look: north-facing, flat rails, bottom slabs, lower door halves, unpowered, non-ascending.
+    """
     best_key = None
     best_score = None
+    facing_default = _default_facing(path)
     for key in variants:
         want = _parse_variant_key(str(key))
         contradictions = 0
         matched = 0
+        defaults = 0
         for k, v in want.items():
             have = props.get(k)
             if have is None:
+                if k == "facing":
+                    defaults += 2 if v == facing_default else 0
+                elif v in _DEFAULT_VALUES:
+                    defaults += 1
                 continue
             if have == v:
                 matched += 1
             else:
                 contradictions += 1
-        score = (-contradictions, matched)
+        score = (-contradictions, matched, defaults)
         if best_score is None or score > best_score:
             best_score = score
             best_key = key
@@ -461,6 +493,61 @@ def _looks_like_forge_variants(variants: dict) -> bool:
         if isinstance(v, dict) and v and all(isinstance(x, dict) for x in v.values()) and "=" not in str(k):
             return True
     return False
+
+
+def _condition_values(cond, out: dict[str, set[str]]) -> None:
+    if not isinstance(cond, dict):
+        return
+    for k, v in cond.items():
+        if k in ("OR", "AND"):
+            if isinstance(v, list):
+                for sub in v:
+                    _condition_values(sub, out)
+            continue
+        out.setdefault(k, set()).update(s.strip() for s in str(v).split("|"))
+
+
+def _with_multipart_defaults(multipart: list, props: dict[str, str], state: BlockState) -> dict[str, str]:
+    """Fill properties a multipart blockstate refers to but the state does not carry.
+
+    Legacy schematics and bare block names have no properties; the game would use the block's
+    default state.  We approximate it: posts up, connections off, walls 'none', axes 'y', lowest
+    numeric value, first listed value otherwise.  Mushroom blocks default to every face present.
+    """
+    referenced: dict[str, set[str]] = {}
+    for part in multipart:
+        if isinstance(part, dict):
+            _condition_values(part.get("when"), referenced)
+    if not referenced:
+        return props
+    out = dict(props)
+    path = state.path
+    multi_face = any(k in path for k in ("vine", "lichen", "vein", "resin_clump"))
+    for prop, values in referenced.items():
+        if prop in out:
+            continue
+        if "true" in values or "false" in values:
+            if multi_face:
+                out[prop] = "true" if prop == "north" else "false"   # one face, like a freshly placed vine
+            elif prop in ("up", "down", "bottom") or "mushroom" in path:
+                out[prop] = "true"
+            else:
+                out[prop] = "false"
+            continue
+        if "none" in values or prop in ("north", "south", "east", "west"):
+            out[prop] = "none"      # wall / carpet sides: unconnected (the value need not appear in any condition)
+            continue
+        numeric = sorted((v for v in values if v.lstrip("-").isdigit()), key=lambda v: int(v))
+        if numeric:
+            out[prop] = numeric[0]
+            continue
+        for pref in ("north", "y", "bottom", "lower", "wall", "floor", "small", "single", "straight", "left"):
+            if pref in values:
+                out[prop] = pref
+                break
+        else:
+            out[prop] = sorted(values)[0]
+    return out
 
 
 def _eval_condition(cond, props: dict[str, str]) -> bool:

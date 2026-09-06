@@ -143,6 +143,7 @@ class BlockVoxelizer:
         rel = np.zeros(n * n * n, dtype=np.uint8) if self.relief_steps else None
         for inst in rs.instances:
             self._stamp_instance(state, inst, out, rel=rel)
+        self._stamp_extra_boxes(state, out)
         pat = BlockPattern(out.reshape(n, n, n), kind="ok", relief=rel.reshape(n, n, n) if rel is not None else None)
         if pat.is_empty and rs.kind == "ok":
             # geometry exists but every sample was transparent (e.g. tiny elements below resolution)
@@ -173,6 +174,104 @@ class BlockVoxelizer:
             return
         for el in model.elements:
             self._stamp_element(state, el, Q, out, extra_pad, rel)
+        self._recolor_nearest_face(state, model, Q, out, rel)
+
+    def _recolor_nearest_face(self, state: BlockState, model, Q: np.ndarray, out: np.ndarray, rel: Optional[np.ndarray]) -> None:
+        """Color every solid voxel of this instance from the nearest textured face of *any* element.
+
+        Vanilla builds some blocks (cactus, many mod blocks) from overlapping elements that each carry
+        only some faces; a voxel on the west side of such a block must take the west texture even when
+        the element that created it only had north/south faces.
+        """
+        faces = []   # (axis, plane, lo_a, hi_a, lo_b, hi_b, element, fname, face)
+        for el in model.elements:
+            if el.rot_axis and el.rot_angle:
+                continue
+            lo, hi = el.frm, el.to
+            for fname, face in el.faces.items():
+                if face.texture == MISSING_TEXTURE:
+                    continue
+                if fname in ("down", "up"):
+                    axis, plane = 1, (lo[1] if fname == "down" else hi[1])
+                    a, b = 0, 2
+                elif fname in ("north", "south"):
+                    axis, plane = 2, (lo[2] if fname == "north" else hi[2])
+                    a, b = 0, 1
+                else:
+                    axis, plane = 0, (lo[0] if fname == "west" else hi[0])
+                    a, b = 1, 2
+                if hi[a] - lo[a] < 1e-6 or hi[b] - lo[b] < 1e-6:
+                    continue
+                faces.append((axis, float(plane), float(lo[a]), float(hi[a]), float(lo[b]), float(hi[b]), a, b, el, fname, face))
+        if len(faces) < 2:
+            return
+        idx = np.nonzero(out)[0]
+        if len(idx) == 0:
+            return
+        q = Q[idx]
+        tol = self.settings.h * 0.5 + 1e-6
+        dist = np.full((len(idx), len(faces)), np.inf)
+        for fi, (axis, plane, la, ha, lb, hb, a, b, el, fname, face) in enumerate(faces):
+            inside = (q[:, a] >= la - tol) & (q[:, a] <= ha + tol) & (q[:, b] >= lb - tol) & (q[:, b] <= hb + tol)
+            d = np.abs(q[:, axis] - plane)
+            dist[:, fi] = np.where(inside, d, np.inf)
+        best = np.argmin(dist, axis=1)
+        has = np.isfinite(dist[np.arange(len(idx)), best])
+        if not has.any():
+            return
+        for fi, (axis, plane, la, ha, lb, hb, a, b, el, fname, face) in enumerate(faces):
+            sel = has & (best == fi)
+            if not sel.any():
+                continue
+            pts = q[sel]
+            lo, hi = el.frm, el.to
+            w = max(hi[0] - lo[0], 1e-6)
+            h = max(hi[1] - lo[1], 1e-6)
+            d = max(hi[2] - lo[2], 1e-6)
+            if fname == "down":
+                sx, sy = (pts[:, 0] - lo[0]) / w, (hi[2] - pts[:, 2]) / d
+            elif fname == "up":
+                sx, sy = (pts[:, 0] - lo[0]) / w, (pts[:, 2] - lo[2]) / d
+            elif fname == "north":
+                sx, sy = (hi[0] - pts[:, 0]) / w, (hi[1] - pts[:, 1]) / h
+            elif fname == "south":
+                sx, sy = (pts[:, 0] - lo[0]) / w, (hi[1] - pts[:, 1]) / h
+            elif fname == "west":
+                sx, sy = (pts[:, 2] - lo[2]) / d, (hi[1] - pts[:, 1]) / h
+            else:
+                sx, sy = (hi[2] - pts[:, 2]) / d, (hi[1] - pts[:, 1]) / h
+            sx = np.clip(sx, 0.0, 0.999999)
+            sy = np.clip(sy, 0.0, 0.999999)
+            rot = face.rotation % 360
+            if rot == 90:
+                sx, sy = 1.0 - sy, sx
+            elif rot == 180:
+                sx, sy = 1.0 - sx, 1.0 - sy
+            elif rot == 270:
+                sx, sy = sy, 1.0 - sx
+            u1, v1, u2, v2 = face.uv if face.uv is not None else _default_uv(fname, lo, hi)
+            u = u1 + sx * (u2 - u1)
+            v = v1 + sy * (v2 - v1)
+            opaque = self._is_forced_opaque(face.texture)
+            rgb, keep = self._sample_texture(face.texture, u, v, opaque)
+            if rgb is None:
+                continue
+            if face.tintindex >= 0:
+                tint = tint_for(state, face.tintindex, self.settings.tint_overrides)
+                if tint is not None:
+                    rgb = apply_tint(rgb, tint)
+            target = idx[sel]
+            # only recolor where the texel is opaque; a transparent texel of the nearest face means the
+            # voxel really belongs to another element (keep its color)
+            ok = keep if keep is not None else np.ones(len(target), dtype=bool)
+            if ok.any():
+                out[target[ok]] = self.colors.index_of(rgb[ok])
+                if rel is not None and self.relief_steps:
+                    size = hi - lo
+                    if size[axis] >= self.settings.relief_min_element:
+                        depth = self._sample_relief(face.texture, u[ok], v[ok])
+                        if depth is not None:
+                            rel[target[ok]] = np.clip(np.round(depth * self.relief_steps), 0, 255).astype(np.uint8)
 
     def _stamp_element(self, state: BlockState, el: Element, Q: np.ndarray, out: np.ndarray, extra_pad: float,
                        rel: Optional[np.ndarray] = None) -> None:
@@ -290,7 +389,9 @@ class BlockVoxelizer:
         px = np.clip((u / 16.0 * W).astype(np.int64), 0, W - 1)
         py = np.clip((v / 16.0 * H).astype(np.int64), 0, H - 1)
         if opaque:
-            return tex[py, px, :3], np.ones(len(px), dtype=bool)
+            filled = self.textures.filled(resource)
+            rgb = filled if filled is not None else tex[..., :3]
+            return rgb[py, px], np.ones(len(px), dtype=bool)
         radius = int(round(self.settings.cutout_dilation * W / 16.0)) if self.settings.cutout_dilation > 0 else 0
         if radius > 0:
             d = self.textures.dilated(resource, self.settings.alpha_threshold, radius)
@@ -378,6 +479,28 @@ class BlockVoxelizer:
                 grid[iy[keep], iz[keep], ix[keep]] = self.colors.index_of(rgb[keep])
         if self.settings.obj_interior_fill:
             _fill_interior(grid)
+
+    def _stamp_extra_boxes(self, state: BlockState, out: np.ndarray) -> None:
+        """Add block-entity geometry the JSON model leaves out (bell body, lectern book...)."""
+        from ..assets.fallbacks import extra_boxes_for
+        boxes = extra_boxes_for(state)
+        if not boxes:
+            return
+        facing = state.properties.get("facing", "north")
+        yrot = {"north": 0, "east": 90, "south": 180, "west": 270}.get(facing, 0)
+        R = rotation_matrix("y", -yrot)
+        centre = np.array([8.0, 8.0, 8.0])
+        Q = (self._points - centre) @ R + centre
+        for (lo, hi), tex, col in boxes:
+            lo_a = np.asarray(lo, dtype=np.float64)
+            hi_a = np.asarray(hi, dtype=np.float64)
+            inside = np.all((Q >= lo_a) & (Q < hi_a), axis=1)
+            if not inside.any():
+                continue
+            rgb = self.textures.average_color(tex) if tex else None
+            if rgb is None:
+                rgb = col if col is not None else hashed_color(state.name)
+            out[inside] = self.colors.index_of_color(rgb)
 
     # ---- fallbacks & fluids -------------------------------------------------------------
     def _fallback(self, state: BlockState, particle: Optional[str], reason: str) -> BlockPattern:

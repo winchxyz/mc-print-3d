@@ -59,6 +59,27 @@ def is_block_entity_block(path: str) -> bool:
     return bool(_BLOCK_ENTITY_RE.search(path)) or path in ("end_portal", "end_gateway")
 
 
+GOLD = (0xF8, 0xC5, 0x3A)
+
+# Blocks whose JSON model is only part of what the game draws; the rest is added by a block-entity
+# renderer.  Boxes are (from, to, texture, color) in model units for the default (floor, north) state.
+EXTRA_BOXES: dict[str, list[tuple[Box, Optional[str], Optional[tuple[int, int, int]]]]] = {
+    "bell": [(((5, 6, 5), (11, 13, 11)), None, GOLD), (((4, 3, 4), (12, 6, 12)), None, GOLD)],
+    "enchanting_table": [(((4, 12, 3), (12, 13.5, 13)), None, (0xC9, 0xB0, 0x8A))],   # the floating book
+    "lectern": [(((3, 12, 4), (13, 14, 12)), None, (0xE6, 0xDC, 0xC0))],
+    "campfire": [(((5, 0, 5), (11, 1, 11)), None, (0xFF, 0x8C, 0x1A))],
+}
+
+
+def extra_boxes_for(state: BlockState) -> list[tuple[Box, Optional[str], Optional[tuple[int, int, int]]]]:
+    p = state.path
+    if p in EXTRA_BOXES:
+        if p == "campfire" and state.properties.get("lit", "true") == "false":
+            return []
+        return EXTRA_BOXES[p]
+    return []
+
+
 def _color_from_name(path: str) -> Optional[tuple[int, int, int]]:
     for c in sorted(WOOL_COLORS, key=len, reverse=True):
         if path.startswith(c + "_") or ("_" + c + "_") in path or path.endswith("_" + c):

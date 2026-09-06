@@ -143,6 +143,41 @@ class TextureLoader:
         self._dil_cache[key] = out
         return out
 
+    def filled(self, resource: str) -> Optional[np.ndarray]:
+        """RGB (H, W, 3) where fully transparent texels take the color of the nearest opaque texel.
+
+        Used for textures that are printed solid (leaves, glass): the holes of a leaf texture are
+        stored black in the PNG and must not show up as black voxels.
+        """
+        key = f"{resource}|filled"
+        cached = self._dil_cache.get(key)
+        if cached is not None:
+            return cached[0]
+        arr = self.get(resource)
+        if arr is None:
+            return None
+        rgb = arr[..., :3].copy()
+        mask = arr[..., 3] > 0
+        if mask.all():
+            self._dil_cache[key] = (rgb, mask)
+            return rgb
+        if not mask.any():
+            return rgb
+        guard = 0
+        while not mask.all() and guard < 64:
+            guard += 1
+            grown = mask.copy()
+            new_rgb = rgb.copy()
+            for shift, axis in ((1, 0), (-1, 0), (1, 1), (-1, 1)):
+                m2 = np.roll(mask, shift, axis=axis)
+                c2 = np.roll(rgb, shift, axis=axis)
+                take = m2 & ~grown
+                new_rgb[take] = c2[take]
+                grown |= take
+            mask, rgb = grown, new_rgb
+        self._dil_cache[key] = (rgb, mask)
+        return rgb
+
     # ---- surface relief --------------------------------------------------------------
     def relief_map(self, resource: str, mode: str = "auto") -> Optional[np.ndarray]:
         """Per-texel recess depth as a float32 (H, W) array in 0..1 (1 = full relief depth), or None.

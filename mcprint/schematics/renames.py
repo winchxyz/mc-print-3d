@@ -54,6 +54,9 @@ _RELEASE_RENAMES = _qualify(
         # In 1.13-1.20.2 "grass" is the short plant; the grass *block* has been
         # grass_block ever since the flattening, so this is unambiguous here.
         "grass": "short_grass",
+        # --- 1.21.9 (copper age) --------------------------------------------
+        # The iron chain got a material prefix when copper chains were added.
+        "chain": "iron_chain",
     }
 )
 

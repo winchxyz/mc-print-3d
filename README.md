@@ -66,6 +66,14 @@ Plus a database of 140+ printers with bed sizes and slot counts, and detection o
 - STL per color, merged STL, OBJ + MTL
 - Tiles that fit the bed, each exported separately
 
+## Block catalog
+
+Every block state of Minecraft 1.21.11 (1,026 of them) rendered through the converter at 16 voxels per block with texel colors and 0.6 mm relief, from the game's own models and textures. Full sheets: [1](docs/catalog/blocks-1.jpg) · [2](docs/catalog/blocks-2.jpg) · [3](docs/catalog/blocks-3.jpg) · [4](docs/catalog/blocks-4.jpg).
+
+[![Block catalog, sheet 1](docs/catalog/blocks-1.jpg)](docs/catalog/blocks-1.jpg)
+
+Blocks the game draws with block-entity renderers (chests, beds, signs, banners, heads, shulker boxes, conduits) have no JSON geometry and are approximated by shaped boxes in their real colors; everything else is the real model.
+
 ## Screenshots
 
 | Desktop app | Model colors → filaments |

@@ -95,6 +95,46 @@ def test_resolve_vanilla_blocks(stack):
     assert fence2.kind == "ok" and len(fence2.instances) == 1
 
 
+def test_bare_names_get_game_defaults(stack):
+    """Blocks named without properties (legacy files, catalogs) resolve like freshly placed blocks."""
+    r = ModelResolver(stack)
+    wall = r.resolve(BlockState.parse("minecraft:cobblestone_wall"))
+    assert wall.kind == "ok" and len(wall.instances) == 1          # post only
+    assert "wall_post" in wall.instances[0].model.name
+    mushroom = r.resolve(BlockState.parse("minecraft:brown_mushroom_block"))
+    assert mushroom.kind == "ok" and len(mushroom.instances) == 6  # every face present
+    vine = r.resolve(BlockState.parse("minecraft:vine"))
+    assert vine.kind == "ok" and len(vine.instances) == 1          # one face, not a ceiling plate
+    carpet = r.resolve(BlockState.parse("minecraft:pale_moss_carpet"))
+    assert carpet.kind == "ok" and len(carpet.instances) == 1      # bottom only, no side walls
+    rod = r.resolve(BlockState.parse("minecraft:end_rod"))
+    assert rod.instances[0].x == 0 and rod.instances[0].y == 0     # facing=up is the unrotated model
+    rail = r.resolve(BlockState.parse("minecraft:activator_rail"))
+    assert "raised" not in rail.instances[0].model.name            # flat, not ascending
+    chain = r.resolve(BlockState.parse("minecraft:iron_chain"))
+    assert chain.instances[0].x == 0                               # axis=y
+
+
+def test_layered_elements_take_nearest_face_texture(stack):
+    """Cactus is built from overlapping elements with partial faces: side voxels must use cactus_side."""
+    from mcprint.voxel import BlockVoxelizer, ColorIndex, VoxelSettings
+    t = TextureLoader(stack)
+    vx = BlockVoxelizer(ModelResolver(stack), t, VoxelSettings(resolution=16, cutout_dilation=0), ColorIndex())
+    p = vx.voxelize(BlockState.parse("minecraft:cactus"))
+    pal = vx.colors.palette().astype(int)
+    side = t.get("minecraft:block/cactus_side")[..., :3].astype(int)
+    # west face voxels (x index 1, the element is inset by one texel) row by row vs. texture column 0.. (u = z)
+    col = p.colors[:, :, 1]                        # [y, z]
+    ok = 0
+    for yi in range(16):
+        for zi in range(2, 14):
+            c = pal[col[15 - yi, zi]]
+            expect = side[yi, zi]
+            if np.abs(c - expect).max() <= 24:      # 15-bit color binning tolerance
+                ok += 1
+    assert ok > 0.8 * 16 * 12
+
+
 def test_textures(stack):
     t = TextureLoader(stack)
     arr = t.get("minecraft:block/stone")
