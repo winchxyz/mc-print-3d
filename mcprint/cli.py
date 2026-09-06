@@ -21,9 +21,10 @@ from . import __version__
 from .settings import ConversionSettings
 
 
-def _add_convert_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("input", help="schematic file (.schematic .schem .litematic .nbt .mcstructure .bp)")
-    p.add_argument("-o", "--output", help="output file (extension chosen by --format); default: <input>.3mf")
+def _add_convert_args(p: argparse.ArgumentParser, positional: bool = True) -> None:
+    if positional:
+        p.add_argument("input", help="schematic file (.schematic .schem .litematic .nbt .mcstructure .bp)")
+        p.add_argument("-o", "--output", help="output file (extension chosen by --format); default: <input>.3mf")
     p.add_argument("--format", choices=["3mf", "3mf-bambu", "stl", "stl-merged", "obj"], default=None)
     g = p.add_argument_group("scale")
     g.add_argument("--block-mm", type=float, help="size of one block in mm (default 5)")
@@ -50,6 +51,7 @@ def _add_convert_args(p: argparse.ArgumentParser) -> None:
                    help="place a mob, e.g. creeper@3,1,4 or sheep@2,1,2,90 (block coords, feet centre; repeatable; see 'mcprint mobs')")
     g.add_argument("--mob-scale", type=float, help="scale every mob (1 = game size)")
     g.add_argument("--mob-free-yaw", action="store_true", help="keep exact entity rotations instead of snapping mobs to 90 degree turns")
+    g.add_argument("--mob-platform", type=float, nargs="?", const=2.0, metavar="MM", help="plate under every mob (thickness in mm, default 2) so figures stand on their own")
     g.add_argument("--skin", help="player skin PNG (64x64) used for 'player' / 'player_slim' mobs")
     g = p.add_argument_group("modular kit")
     g.add_argument("--kit", action="store_true", help="build a modular kit: pieces with studs/sockets, print plates, baseplate and assembly guide")
@@ -118,6 +120,9 @@ def _settings_from_args(a: argparse.Namespace) -> ConversionSettings:
         s.mob_scale = max(0.05, a.mob_scale)
     if a.mob_free_yaw:
         s.mob_snap_yaw = False
+    if getattr(a, "mob_platform", None) is not None:
+        s.mob_platform = True
+        s.mob_platform_mm = max(0.4, float(a.mob_platform))
     if a.skin:
         s.player_skin = a.skin
     if a.kit:
@@ -220,6 +225,55 @@ def _parse_mob_spec(spec: str) -> dict:
     except ValueError:
         raise SystemExit(f"--mob coordinates must be numbers: {spec!r}")
     return {"id": normalize_mob_id(mid), "x": x, "y": y, "z": z, "yaw": yaw, "props": props}
+
+
+def cmd_mob(a: argparse.Namespace) -> int:
+    """Print one mob as a figure: an empty schematic with a single entity, optional plate, any format or a kit."""
+    import numpy as np
+    from .mobs import mob_model, normalize_mob_id
+    from .pipeline import Converter
+    from .schematics import BlockState, Schematic
+    from .schematics.entities import Entity
+    from .schematics.litematica import save_litematic
+    spec = _parse_mob_spec(a.mob_id if "@" in a.mob_id else a.mob_id + "@0.5,0,0.5," + str(a.yaw))
+    if mob_model(spec["id"], spec["props"]) is None:
+        print(f"error: no printable model for {spec['id']!r} (see 'mcprint mobs')", file=sys.stderr)
+        return 2
+    s = _settings_from_args(a)
+    s.include_mobs = True
+    s.extra_mobs = []
+    s.remove_islands = False
+    s.fill_cavities = False
+    s.crop = True
+    s.mob_platform = not a.no_platform
+    if a.platform_mm:
+        s.mob_platform_mm = a.platform_mm
+    schem = Schematic(1, 1, 1, [BlockState.make("minecraft:air")], np.zeros((1, 1, 1), dtype=np.int32), name=spec["id"])
+    schem.entities = [Entity("minecraft:" + spec["id"], spec["x"], spec["y"], spec["z"], spec["yaw"], spec["props"])]
+    out = Path(a.output) if a.output else Path(f"{spec['id']}.3mf")
+    tmp = out.with_suffix(".mob.litematic")
+    save_litematic(schem, str(tmp))
+    last = [""]
+
+    def progress(frac: float, msg: str) -> None:
+        if msg != last[0]:
+            print(f"[{int(frac * 100):3d}%] {msg}")
+            last[0] = msg
+
+    conv = Converter(s, progress=progress)
+    try:
+        res = conv.run(tmp, out)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+    print(f"Figure: {spec['id']} at {res.block_mm:.2f} mm per block -> {res.size_text()}")
+    for w in res.warnings:
+        print("warning:", w)
+    for f in res.files:
+        print("wrote", f)
+    return 0
 
 
 def cmd_mobs(a: argparse.Namespace) -> int:
@@ -389,6 +443,14 @@ def build_parser() -> argparse.ArgumentParser:
     n.set_defaults(fn=cmd_instances)
     mb = sub.add_parser("mobs", help="list printable mobs")
     mb.set_defaults(fn=cmd_mobs)
+    mo = sub.add_parser("mob", help="print one mob as a standalone figure")
+    mo.add_argument("mob_id", metavar="MOB", help="mob id, optionally with a variant (sheep:red, slime:3, wolf:snowy) or ID@X,Y,Z[,YAW]")
+    mo.add_argument("-o", "--output", help="output file (default <mob>.3mf)")
+    _add_convert_args(mo, positional=False)
+    mo.add_argument("--yaw", type=float, default=0.0, help="facing in degrees (0 = south)")
+    mo.add_argument("--no-platform", action="store_true", help="no plate under the figure")
+    mo.add_argument("--platform-mm", type=float, help="plate thickness in mm (default 2)")
+    mo.set_defaults(fn=cmd_mob)
     pr = sub.add_parser("printers", help="list / discover printers")
     pr.add_argument("--scan", action="store_true", help="discover printers on USB and the network")
     pr.add_argument("--subnet", action="store_true", help="also port-scan the local subnet")

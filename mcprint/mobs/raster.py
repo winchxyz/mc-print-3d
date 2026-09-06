@@ -282,20 +282,67 @@ class MobVoxelizer:
 # ---------------------------------------------------------------------------------------
 # placement into a VoxelModel
 # ---------------------------------------------------------------------------------------
+PLATFORM_RGB = (0x8C, 0x8C, 0x8C)
+
+
+def add_platform(raster: MobRaster, n: int, thickness_voxels: int, margin_voxels: int, color_index: int) -> None:
+    """Put a plate under the figure: the footprint of its lowest voxel layer grown by ``margin_voxels``,
+    ``thickness_voxels`` thick, in the cell layer below the feet (so the feet stand on it)."""
+    if thickness_voxels <= 0 or not raster.cells:
+        return
+    y0 = min(c[1] for c in raster.cells)
+    ground = [(c, p) for c, p in raster.cells.items() if c[1] == y0]
+    xs: list[int] = []
+    zs: list[int] = []
+    for (bx, _by, bz), pat in ground:
+        occ = pat.colors != 0
+        rows = np.nonzero(occ)[0]
+        if not len(rows):
+            continue
+        low = occ[rows.min()]                     # lowest occupied voxel layer of this cell [z, x]
+        zz, xx = np.nonzero(low)
+        xs.extend((bx * n + xx).tolist())
+        zs.extend((bz * n + zz).tolist())
+    if not xs:
+        return
+    x0, x1 = min(xs) - margin_voxels, max(xs) + margin_voxels + 1
+    z0, z1 = min(zs) - margin_voxels, max(zs) + margin_voxels + 1
+    t = min(thickness_voxels, n)
+    for bx in range(x0 // n - (1 if x0 < 0 and x0 % n else 0), (x1 - 1) // n + 1):
+        for bz in range(z0 // n - (1 if z0 < 0 and z0 % n else 0), (z1 - 1) // n + 1):
+            cell = (bx, y0 - 1, bz)
+            pat = raster.cells.get(cell)
+            colors = pat.colors.copy() if pat is not None else np.zeros((n, n, n), dtype=np.uint16)
+            lx0, lx1 = max(x0 - bx * n, 0), min(x1 - bx * n, n)
+            lz0, lz1 = max(z0 - bz * n, 0), min(z1 - bz * n, n)
+            if lx0 >= lx1 or lz0 >= lz1:
+                continue
+            colors[n - t:n, lz0:lz1, lx0:lx1] = np.where(colors[n - t:n, lz0:lz1, lx0:lx1] == 0, color_index, colors[n - t:n, lz0:lz1, lx0:lx1])
+            raster.cells[cell] = BlockPattern(colors, kind="mob", note=(pat.note if pat is not None else "platform"))
+    raster.origin = (min(raster.origin[0], min(c[0] for c in raster.cells)), min(raster.origin[1], y0 - 1), min(raster.origin[2], min(c[2] for c in raster.cells)))
+
+
 def place_mobs(model, placements: list[MobPlacement], vox: BlockVoxelizer, min_units: float = 1.0,
-               alpha_threshold: int = 96) -> tuple[int, list[str]]:
+               alpha_threshold: int = 96, platform_units: float = 0.0) -> tuple[int, list[str]]:
     """Rasterize ``placements`` and write them into ``model`` (a :class:`VoxelModel`).
 
     The block grid grows when a mob sticks out of it.  Mob voxels are merged over existing block
-    geometry (a mob standing in tall grass keeps the grass).  Returns (mobs placed, warnings).
+    geometry (a mob standing in tall grass keeps the grass).  ``platform_units`` > 0 adds a plate of
+    that thickness (model units) under every figure.  Returns (mobs placed, warnings).
     """
     mv = MobVoxelizer(vox, min_units=min_units, alpha_threshold=alpha_threshold)
     warnings: list[str] = []
     placed = 0
-    merged_cache: dict[tuple[int, int], int] = {}
+    n = vox.settings.resolution
+    plate_color = vox.colors.index_of_color(PLATFORM_RGB) if platform_units > 0 else 0
     for k, pl in enumerate(placements):
         try:
             raster = mv.rasterize(pl)
+            if platform_units > 0:
+                add_platform(raster, n, max(1, int(round(platform_units * n / 16.0))), max(1, int(round(n / 8))), plate_color)
+                for pat in raster.cells.values():
+                    if not pat.exposed_counts:
+                        vox._finish(pat)
         except Exception as exc:  # pragma: no cover - never let one mob kill the conversion
             warnings.append(f"mob {pl.label}: {exc}")
             continue

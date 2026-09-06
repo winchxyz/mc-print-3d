@@ -33,7 +33,7 @@ Existing converters treat every block as a cube, or need a resource pack and a l
 - Loads the vanilla jar, every mod jar of the chosen instance (including nested jar-in-jar libraries) and the enabled resource packs
 - Resolves blockstates → variants / multipart → model parent chains → texture variables, exactly like the game
 - Understands Forge / NeoForge `obj` and `composite` model loaders; chests and beds are rebuilt from their entity atlases (lid, latch, pillow, legs), other block-entity blocks (signs, banners, heads, shulker boxes) get shaped fallbacks
-- Mobs: creatures stored in the schematic are printed as figures from the game's entity models and skins, and you can place more yourself
+- Mobs: creatures stored in the schematic are printed as figures from the game's own entity models (read out of the client jar) and skins; place more yourself, or print a single mob as a figure on a plate
 
 **Geometry**
 - Every block state is voxelized from its model elements at 2–32 sub-voxels per block (chosen automatically from block size and nozzle)
@@ -67,9 +67,9 @@ Plus a database of 140+ printers with bed sizes and slot counts, and detection o
 - Build: one solid model, or a modular kit of studded pieces with print plates, baseplate tiles and a layer-by-layer assembly guide
 
 **Mobs**
-- 27 vanilla mobs (creeper, zombie, skeleton, villager, enderman, iron golem, pig, cow, sheep, wolf, cat, spider, slime, ghast, players with custom skins…) built from the game's own ModelPart geometry and entity textures
-- Entities saved in `.schem`, `.litematic`, `.nbt`, `.schematic` and `.mcstructure` files are placed automatically, with their rotation, sheep color, slime size and pig/cow/wolf/cat variants
-- Extra mobs from the command line or the app; in kit mode each mob becomes one figure piece on a socketed base tile
+- 78 vanilla mobs, from creeper to warden, with geometry extracted from the Minecraft client jar itself (`tools/extract_entity_models.py` runs the game's model code through a small bytecode interpreter) and the game's entity textures
+- Entities saved in `.schem`, `.litematic`, `.nbt`, `.schematic` and `.mcstructure` files are placed automatically, with their rotation, sheep color, slime size and animal variants
+- Extra mobs from the command line or the app, a plate under every figure on request, and `mcprint mob creeper` to print one mob on its own; in kit mode each mob becomes one figure piece on a socketed base tile
 
 **Output**
 - 3MF with one part per filament and base materials (any slicer)
@@ -122,7 +122,7 @@ python -m mcprint convert castle.litematic --style cubes           # plain cubes
 
 ![Printable mobs](docs/mobs.jpg)
 
-*Every printable mob rasterized at 16 voxels per block from the 1.21.11 entity textures: bee, bogged, cat, cave spider, chicken, cow, creeper, drowned, enderman, ghast, husk, iron golem, mooshroom, ocelot, pig, player (Steve), player slim (Alex), sheep, skeleton, slime, snow golem, spider, stray, villager, wither skeleton, wolf, zombie, plus a red sheep, a sheared sheep, a size-3 slime, a siamese cat and a snowy wolf.*
+*All 78 printable mobs rasterized at 16 voxels per block from the 1.21.11 entity textures, plus a red sheep, a sheared sheep, a size-3 slime, a siamese cat and a snowy wolf. Hostile: blaze, bogged, breeze, cave spider, creaking, creeper, drowned, elder guardian, enderman, endermite, evoker, ghast, giant, guardian, hoglin, husk, illusioner, magma cube, parched, phantom, piglin, piglin brute, pillager, ravager, shulker, silverfish, skeleton, slime, spider, stray, strider, vex, vindicator, warden, witch, wither skeleton, zoglin, zombie, zombie villager, zombified piglin. Friendly: allay, armadillo, axolotl, bat, bee, camel, cat, chicken, cod, cow, dolphin, fox, frog, glow squid, goat, happy ghast, horse, iron golem, llama, mooshroom, nautilus, ocelot, panda, parrot, pig, players (Steve and Alex, or your own skin), pufferfish, rabbit, salmon, sheep, skeleton horse, sniffer, snow golem, squid, tadpole, turtle, villager, wandering trader, wolf, zombie horse.*
 
 ![Cottage with mobs](docs/preview-mobs.png)
 
@@ -130,17 +130,25 @@ python -m mcprint convert castle.litematic --style cubes           # plain cubes
 
 ![Yard close-up](docs/preview-mobs-closeup.png)
 
-Mobs are built the way the game builds them: every `ModelPart` box with its `texOffs` UV layout, `PartPose` offsets and rotations (a pig's body is a rotated box, spider legs are angled), the renderer's mirror and the `180 − yaw` turn. Each sub-voxel inside a box is colored from the atlas face it is closest to, so skins map onto the figure exactly. Hat, jacket and sleeve layers are baked onto the body instead of printed as paper-thin shells; enderman eyes and the snow golem's pumpkin are extra layers. The slime's outer cube is a translucent "clear filament" color with the core and eyes inside it.
+The geometry is not modelled by hand. Minecraft keeps its entity models in code (`CreeperModel.createBodyLayer()` and friends), so `tools/extract_entity_models.py` runs that code from the client jar through a small JVM bytecode interpreter, using Mojang's published mappings to find the classes, and writes every `LayerDefinition` to `mcprint/mobs/vanilla_models.json`: each box with its `texOffs`, mirror flag and `CubeDeformation`, the `PartPose` offsets and rotations, the texture size the model was authored for, and the render scale (cave spider 0.7, wither skeleton 1.2, ghast 4.5). The same tool regenerates the file for any version. The rasterizer then reproduces the renderer: the `scale(-1, -1, 1)` mirror, the `180 − yaw` turn, and each sub-voxel inside a box colored from the atlas face it is closest to, so skins map onto the figure exactly. What is added by hand is small and listed in `mcprint/mobs/models.py`: the texture each renderer uses, stacked layers (sheep wool, the slime's translucent outer cube), parts the game hides by default (an armadillo's rolled-up cube, a frog's tongue), and the few rest poses `setupAnim` applies at runtime (zombie arms forward, a cat's tail). Skin overlays (hats, jackets, sleeves) are baked onto the body instead of printed as paper-thin shells; enderman eyes, the snow golem's pumpkin block and the mooshroom's mushrooms are extra layers.
+
+![Standalone figures](docs/figures.png)
+
+*`mcprint mob` prints one mob as a figure: creeper with and without its plate, villager, snowy wolf, warden, axolotl, at 16 mm per block.*
 
 - **From the schematic.** Entities are read from Sponge v2/v3, Litematica regions, structure files, MCEdit (`WEOrigin` aware) and `.mcstructure`. Position, yaw, sheep `Color`/`Sheared`, slime `Size` and `variant` tags are used; unsupported entity types (item frames, minecarts, mobs without a model yet) are listed as warnings.
 - **Placed by hand.** `--mob ID@X,Y,Z[,YAW]` in block coordinates (feet centre, relative to the schematic), repeatable; `sheep:red@…`, `slime:3@…`, `pig:cold@…`, `wolf:snowy@…`, `cat:siamese@…` pick variants; `--skin steve.png` uses your own 64×64 skin for `player` / `player_slim`; `--mob-scale 2` makes every mob twice the size; `--no-mobs` ignores schematic entities. The app has the same controls on the Schematic tab.
+- **Plates.** `--mob-platform` (or the checkbox in the app) puts a 2 mm plate under every mob in a solid build, sized to the figure's footprint, so it stands on its own. Kit pieces always get a socketed base tile that clicks onto the studded baseplate.
+- **One mob, one file.** `mcprint mob creeper --block-mm 20` writes a creeper figure with its plate; `mcprint mob sheep:red --kit` a red sheep as a kit piece; `mcprint mob player --skin me.png --format stl` you.
 - **Kit mode.** A mob is one piece: all of its cells as a single body on a base tile with a socket under every ground cell (no studs on a head). Figures print in their dominant color; use the solid build for full-color mobs.
 - **Rotation.** Entity yaws are snapped to the nearest 90° by default so a figure's boxes align with the voxel grid; a mob turned 37° would print as stair-steps on every face. `--mob-free-yaw` (or the checkbox in the app) keeps the exact rotation.
 - **Detail.** Mobs share the block resolution (16 sub-voxels per block by default), so a 4-unit-wide arm is 4 voxels wide and tilted parts (villager arms, spider legs, wolf tail) come out stair-stepped like any diagonal in a voxel model. Set *resolution* to 32 in the Model tab or pass `--resolution 32` for finer figures at the cost of larger meshes.
 
 ```bash
 python -m mcprint mobs                                                    # list ids, sizes, textures
-python -m mcprint convert village.litematic --mob creeper@5,1,7,90 --mob sheep:red@2,1,2
+python -m mcprint mob creeper --block-mm 20 -o creeper.3mf                # one figure on a plate
+python -m mcprint mob warden --block-mm 12 --format stl --no-platform
+python -m mcprint convert village.litematic --mob creeper@5,1,7,90 --mob sheep:red@2,1,2 --mob-platform
 python -m mcprint convert base.schem --mob player@3,1,3 --skin my_skin.png --mob-scale 1.5
 ```
 
@@ -252,7 +260,8 @@ Print space: Minecraft X → X, Minecraft Z (south) → −Y, Minecraft Y (up) �
 | `mcprint/schematics/` | format loaders, legacy id table, block renames, Bedrock name mapping |
 | `mcprint/assets/` | installation discovery, jar/mod/pack stack, blockstate/model/texture resolution, tints, fallbacks, OBJ models |
 | `mcprint/voxel/` | voxelizer, texture relief, chunked grid, block-level cleanup, greedy mesher, connection inference |
-| `mcprint/mobs/` | vanilla entity models in ModelPart conventions, mob rasterizer, placement into the voxel grid |
+| `mcprint/mobs/` | entity geometry extracted from the client jar (`vanilla_models.json`), per-mob textures/layers/poses, rasterizer, placement into the voxel grid |
+| `tools/extract_entity_models.py` | JVM bytecode interpreter for the game's model code: regenerates `vanilla_models.json` from any client jar + Mojang mappings |
 | `mcprint/color/` | k-means / filament assignment, filament library, catalog, slicer preset import |
 | `mcprint/export/` | STL, OBJ, 3MF writers, bed tiling |
 | `mcprint/printers/` | printer database, backends, discovery, profiles, slicer detection |
@@ -272,7 +281,7 @@ The suite (279 tests) covers NBT, every loader, the resolver, voxelizer, relief,
 - Bambu Lab AMS reading needs the printer's LAN access code and, on recent firmware, Developer/LAN mode. If Bambu Studio is running it may hold the discovery port; enter IP and serial manually then.
 - Texture relief is inferred for textures without height maps; a pattern that the analysis does not recognise as line-like stays flat (mode `dark` or `light` forces it).
 - Mod blocks rendered entirely in code (no JSON model, no OBJ) are approximated by a cube colored from their particle texture.
-- Mobs are printed in their default standing pose (zombie arms forward, villager arms crossed); baby mobs print at adult size, and horses, axolotls, allays, frogs, wardens and most other 2019+ mobs have no model yet.
+- Mobs are printed in their rest pose (zombie arms forward, villager arms crossed); baby mobs print at adult size. Mobs whose shape only exists at runtime (the ender dragon's neck and tail segments, the wither, copper golems) are not included.
 - The Bambu-flavoured 3MF project metadata is a best effort; the plain 3MF is the safe route for any slicer.
 
 ## License

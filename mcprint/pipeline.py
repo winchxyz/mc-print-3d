@@ -213,7 +213,9 @@ class Converter:
         if placements:
             self.progress(0.52, f"Placing {len(placements)} mob(s)")
             from .mobs import place_mobs
-            placed, mob_warnings = place_mobs(model, placements, vox, min_units=vs.min_thickness, alpha_threshold=vs.alpha_threshold)
+            plate = (self.settings.mob_platform_mm / block_mm * 16.0) if (self.settings.mob_platform and self.settings.build_type != "kit") else 0.0
+            placed, mob_warnings = place_mobs(model, placements, vox, min_units=vs.min_thickness, alpha_threshold=vs.alpha_threshold,
+                                              platform_units=plate)
             stats["mobs"] = placed
             model.warnings.extend(mob_warnings)
         stats["voxelize_s"] = round(time.time() - t0, 2)

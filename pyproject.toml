@@ -29,7 +29,7 @@ mcprint-gui = "mcprint.app:main"
 include = ["mcprint*"]
 
 [tool.setuptools.package-data]
-mcprint = ["data/*.json"]
+mcprint = ["data/*.json", "mobs/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

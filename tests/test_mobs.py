@@ -33,7 +33,7 @@ def test_id_normalization_and_props():
     assert normalize_mob_id("minecraft:creeper") == "creeper"
     assert normalize_mob_id("VillagerGolem") == "iron_golem"
     assert normalize_mob_id("Ozelot") == "cat"
-    assert mob_model("minecraft:phantom") is None
+    assert mob_model("minecraft:ender_dragon") is None       # animated at runtime, not printable from the rest pose
     red = mob_model("sheep", {"color": 14})
     assert any(b.tint == (0xB0, 0x2E, 0x26) for p in red.parts for b in p.boxes)
     sheared = mob_model("sheep", {"sheared": True})

@@ -178,6 +178,9 @@ class MainWindow(QMainWindow):
         self.mob_snap = QCheckBox("Turn mobs to the nearest 90° (clean faces; off keeps exact rotations)")
         self.mob_snap.setChecked(self.settings.mob_snap_yaw)
         ml.addWidget(self.mob_snap)
+        self.mob_platform = QCheckBox("Plate under every mob (2 mm; figures stand on their own, kit pieces always get a socketed tile)")
+        self.mob_platform.setChecked(self.settings.mob_platform)
+        ml.addWidget(self.mob_platform)
         self.entity_label = QLabel("No mobs in the loaded schematic.")
         self.entity_label.setWordWrap(True)
         ml.addWidget(self.entity_label)
@@ -775,6 +778,7 @@ class MainWindow(QMainWindow):
         s.extra_mobs = [self.mob_list.item(i).data(Qt.UserRole) for i in range(self.mob_list.count())]
         s.mob_scale = self.mob_scale.value()
         s.mob_snap_yaw = self.mob_snap.isChecked()
+        s.mob_platform = self.mob_platform.isChecked()
         s.solid_textures = [t.strip() for t in self.solid_tex.text().split(",") if t.strip()]
         s.color_mode = self.color_mode.currentData() or "block"
         s.max_colors = self.max_colors.value()
