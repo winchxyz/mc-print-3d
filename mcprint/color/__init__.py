@@ -1,0 +1,1 @@
+"""mcprint.color package."""

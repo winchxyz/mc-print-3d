@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+*.stl
+*.3mf
+*.obj
+!tests/fixtures/**
+out/
