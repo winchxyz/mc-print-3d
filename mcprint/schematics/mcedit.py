@@ -6,6 +6,7 @@ import logging
 import numpy as np
 
 from .. import nbt
+from .entities import resolve_entities
 from .base import AIR, BlockState, PaletteBuilder, Schematic
 
 log = logging.getLogger(__name__)
@@ -117,6 +118,12 @@ def load_mcedit(root: nbt.Compound, source: str = "") -> Schematic:
     ents = root.get("TileEntities")
     if isinstance(ents, list):
         s.block_entities = list(ents)
+    mobs = root.get("Entities")
+    if isinstance(mobs, list) and mobs:
+        wo = [float(root.get_int(k)) for k in ("WEOriginX", "WEOriginY", "WEOriginZ")]
+        wf = [float(root.get_int(k)) for k in ("WEOffsetX", "WEOffsetY", "WEOffsetZ")]
+        origins = [(0.0, 0.0, 0.0), tuple(wo), tuple(a + b for a, b in zip(wo, wf))]
+        s.entities = resolve_entities(mobs, (width, height, length), origins, s.warnings)
     if unknown:
         s.warnings.append(f"{len(unknown)} unknown numeric block ids (no name mapping in file): "
                           + ", ".join(str(u) for u in sorted(unknown)[:20]))

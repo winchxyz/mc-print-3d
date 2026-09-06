@@ -44,6 +44,12 @@ def _add_convert_args(p: argparse.ArgumentParser) -> None:
     g.add_argument("--relief", type=float, help="surface relief depth in mm carved from textures (bricks, planks...); 0 = flat faces (default 0.5)")
     g.add_argument("--relief-mode", choices=["auto", "heightmap", "pattern", "dark", "light"], help="how texels map to depth (default auto)")
     g.add_argument("--style", choices=["textured", "flat", "cubes"], help="textured = relief from textures (default); flat = smooth faces, no relief; cubes = every block a plain cube")
+    g = p.add_argument_group("mobs")
+    g.add_argument("--no-mobs", action="store_true", help="ignore mobs stored in the schematic (entities)")
+    g.add_argument("--mob", action="append", default=[], metavar="ID@X,Y,Z[,YAW]",
+                   help="place a mob, e.g. creeper@3,1,4 or sheep@2,1,2,90 (block coords, feet centre; repeatable; see 'mcprint mobs')")
+    g.add_argument("--mob-scale", type=float, help="scale every mob (1 = game size)")
+    g.add_argument("--skin", help="player skin PNG (64x64) used for 'player' / 'player_slim' mobs")
     g = p.add_argument_group("modular kit")
     g.add_argument("--kit", action="store_true", help="build a modular kit: pieces with studs/sockets, print plates, baseplate and assembly guide")
     g.add_argument("--kit-fit", type=float, help="stud/socket clearance per side in mm (default 0.15)")
@@ -103,6 +109,14 @@ def _settings_from_args(a: argparse.Namespace) -> ConversionSettings:
         s.relief_mode = a.relief_mode
     if a.style:
         s.style = a.style
+    if a.no_mobs:
+        s.include_mobs = False
+    if a.mob:
+        s.extra_mobs = [_parse_mob_spec(spec) for spec in a.mob]
+    if a.mob_scale:
+        s.mob_scale = max(0.05, a.mob_scale)
+    if a.skin:
+        s.player_skin = a.skin
     if a.kit:
         s.build_type = "kit"
     if a.kit_fit is not None:
@@ -179,6 +193,42 @@ def _parse_filaments(spec: str):
     return out
 
 
+def _parse_mob_spec(spec: str) -> dict:
+    """'creeper@3,1,4' or 'sheep@2,1,2,90' or 'sheep:red@1,1,1' -> extra_mobs entry."""
+    from .mobs import normalize_mob_id
+    if "@" not in spec:
+        raise SystemExit(f"--mob needs ID@X,Y,Z[,YAW], got {spec!r}")
+    mid, coords = spec.split("@", 1)
+    props: dict = {}
+    if ":" in mid and not mid.startswith("minecraft:"):
+        mid, variant = mid.split(":", 1)
+        if normalize_mob_id(mid) == "sheep":
+            props["color"] = variant
+        elif normalize_mob_id(mid) == "slime":
+            props["size"] = int(variant)
+        else:
+            props["variant"] = variant
+    parts = [v.strip() for v in coords.split(",")]
+    if len(parts) not in (3, 4):
+        raise SystemExit(f"--mob needs X,Y,Z[,YAW] after '@', got {spec!r}")
+    try:
+        x, y, z = (float(v) for v in parts[:3])
+        yaw = float(parts[3]) if len(parts) == 4 else 0.0
+    except ValueError:
+        raise SystemExit(f"--mob coordinates must be numbers: {spec!r}")
+    return {"id": normalize_mob_id(mid), "x": x, "y": y, "z": z, "yaw": yaw, "props": props}
+
+
+def cmd_mobs(a: argparse.Namespace) -> int:
+    from .mobs import MOB_IDS, mob_model
+    print("Printable mobs (use with --mob ID@X,Y,Z[,YAW]; schematic entities of these types print automatically):")
+    for mid in MOB_IDS:
+        m = mob_model(mid)
+        print(f"  {mid:16s} {m.label:22s} ~{m.width * m.scale:.1f} x {m.height:.1f} blocks   texture {m.texture}")
+    print("Variants: sheep:red@..., slime:3@... (size), pig:cold@..., wolf:snowy@..., cat:siamese@...; --skin file.png for player")
+    return 0
+
+
 def cmd_convert(a: argparse.Namespace) -> int:
     from .pipeline import Converter
     from .assets import manual_instance
@@ -217,6 +267,8 @@ def cmd_convert(a: argparse.Namespace) -> int:
     if st.get("kit"):
         k = st["kit"]
         print(f"Kit: {k['pieces']} pieces of {k['types']} types on {k['plates']} plates, {k['baseplates']} baseplate tile(s)")
+    if st.get("mobs"):
+        print(f"Mobs printed: {st['mobs']}")
     if st.get("fallback_states"):
         print(f"Fallback shapes used for {len(st['fallback_states'])} block types (e.g. {list(st['fallback_states'])[:3]})")
     if st.get("missing_blockstates"):
@@ -332,6 +384,8 @@ def build_parser() -> argparse.ArgumentParser:
     i.set_defaults(fn=cmd_info)
     n = sub.add_parser("instances", help="list Minecraft installations found on this machine")
     n.set_defaults(fn=cmd_instances)
+    mb = sub.add_parser("mobs", help="list printable mobs")
+    mb.set_defaults(fn=cmd_mobs)
     pr = sub.add_parser("printers", help="list / discover printers")
     pr.add_argument("--scan", action="store_true", help="discover printers on USB and the network")
     pr.add_argument("--subnet", action="store_true", help="also port-scan the local subnet")

@@ -79,6 +79,7 @@ class PieceType:
     count: int = 0
     mesh: Optional[MeshSet] = None
     block_indices: tuple = ()        # one palette index per unit (paired blocks: door lower+upper, bed foot+head)
+    cells: tuple = ()                # axis 'g' (figure): (dx, dy, dz) block offsets of every cell, aligned with block_indices
 
     @property
     def footprint_mm(self) -> tuple[float, float]:
@@ -86,11 +87,26 @@ class PieceType:
 
     @property
     def units_y(self) -> int:
+        if self.axis == "g":
+            return max((c[1] for c in self.cells), default=0) + 1
         return self.length if self.axis == "y" else 1
+
+    @property
+    def units_xz(self) -> tuple[int, int]:
+        if self.axis == "g":
+            return (max((c[0] for c in self.cells), default=0) + 1, max((c[2] for c in self.cells), default=0) + 1)
+        return (self.length, 1) if self.axis == "x" else (1, self.length)
+
+    @property
+    def is_figure(self) -> bool:
+        return self.axis == "g"
 
     @property
     def label(self) -> str:
         n = self.state.path
+        if self.axis == "g":
+            nx, nz = self.units_xz
+            return f"{self.state.properties.get('id', 'mob')} figure {nx}x{nz}x{self.units_y}"
         if self.axis == "y" and self.length > 1:
             return f"{n} (both halves)"
         if self.length > 1 and self.block_indices and len(set(self.block_indices)) > 1:
@@ -197,8 +213,43 @@ def extract_pieces(model: VoxelModel, plan: ColorPlan, settings: KitSettings) ->
         pt.count += 1
         return pt
 
-    # --- paired blocks: door/plant halves stacked vertically, bed foot+head side by side --------
     consumed = np.zeros_like(blocks, dtype=bool)
+    # --- mobs: every cell of one figure becomes a single piece on a socketed base tile -----------
+    figures: dict[str, list[tuple[int, int, int]]] = {}
+    for idx in np.unique(blocks):
+        idx = int(idx)
+        if idx and model.palette[idx].name == "mcprint:mob":
+            key = model.palette[idx].properties.get("n", "0")
+            for y, z, x in zip(*np.nonzero(blocks == idx)):
+                figures.setdefault(key, []).append((int(y), int(z), int(x)))
+    for key in sorted(figures, key=lambda k: int(k) if k.isdigit() else 0):
+        cells = sorted(figures[key])
+        y0 = min(c[0] for c in cells); z0 = min(c[1] for c in cells); x0 = min(c[2] for c in cells)
+        offsets = tuple((x - x0, y - y0, z - z0) for y, z, x in cells)
+        indices = tuple(int(blocks[y, z, x]) for y, z, x in cells)
+        # one filament per piece: the most exposed color over the whole figure
+        counts: dict[int, int] = {}
+        for i in indices:
+            for c, v in (pats[i].exposed_counts or {}).items():
+                counts[c] = counts.get(c, 0) + v
+        color_idx = max(counts, key=counts.get) if counts else int(pats[indices[0]].dominant)
+        m = int(plan.lut[color_idx]) if color_idx < len(plan.lut) else 0
+        if m == 0 and plan.materials:
+            avg = pats[indices[0]].avg_rgb or (128, 128, 128)
+            m = min(plan.materials, key=lambda k: sum((a - b) ** 2 for a, b in zip(plan.materials[k].rgb, avg)))
+        rgb = plan.materials[m].rgb if m in plan.materials else tuple(int(v) for v in pal_rgb[color_idx])
+        counter[0] += 1
+        st = model.palette[indices[0]]
+        pt = PieceType(id=f"P{counter[0]:03d}", key=("mob", key), block_index=indices[0], state=st, length=len(cells), axis="g",
+                       cube=False, material=m, rgb=tuple(int(v) for v in rgb), has_stud=False, has_socket=True, base_tile=True,
+                       block_indices=indices, cells=offsets)
+        pt.count = 1
+        types[("mob", key)] = pt
+        kit.placements.append(Placement(pt, x0, y0, z0))
+        for y, z, x in cells:
+            consumed[y, z, x] = True
+
+    # --- paired blocks: door/plant halves stacked vertically, bed foot+head side by side --------
     starts: dict[tuple[int, int, int], tuple[int, str, tuple]] = {}   # (y,z,x) -> (length, axis, indices)
     _FACING = {"north": (0, -1), "south": (0, 1), "west": (-1, 0), "east": (1, 0)}
     for y in range(Y):
@@ -332,12 +383,41 @@ def _cut_socket(bm: BoxModel, cx: float, cy: float, z0: float, s: KitSettings) -
 
 def piece_extent(piece: PieceType, s: KitSettings) -> tuple[float, float]:
     U = s.unit_mm
+    if piece.axis == "g":
+        nx, nz = piece.units_xz
+        return (nx * U, nz * U)
     if piece.axis == "y":
         return (U, U)
     return (piece.length * U, U) if piece.axis == "x" else (U, piece.length * U)
 
 
+def build_figure_mesh(piece: PieceType, model: VoxelModel, s: KitSettings) -> MeshSet:
+    """A mob: all of its block cells as one body standing on a base tile with a socket under every ground cell."""
+    U = s.unit_mm
+    mat = max(1, piece.material)
+    nx, nz = piece.units_xz
+    ny = piece.units_y
+    n = model.resolution
+    occ = np.zeros((ny * n, nz * n, nx * n), dtype=bool)          # [Z, Y, X] print axes
+    for (dx, dy, dz), idx in zip(piece.cells, piece.block_indices):
+        pat = model.patterns[idx]
+        occ_p = (pat.colors != 0)[:, ::-1, :]                       # Minecraft [y, z, x] -> print [Z, Y(-z), X]
+        py = (nz - 1 - dz) * n
+        occ[dy * n:(dy + 1) * n, py:py + n, dx * n:(dx + 1) * n] |= occ_p
+    bm = BoxModel()
+    bm.add_body(VoxelBody(occ, None, (0.0, 0.0, 0.0), U / n, mat))
+    ground = sorted({(dx, dz) for (dx, dy, dz) in piece.cells if dy == 0})
+    for dx, dz in ground:
+        px, py = dx * U, (nz - 1 - dz) * U
+        bm.add((px, py, 0), (px + U, py + U, s.base_tile_mm), mat)
+        _cut_socket(bm, px + U / 2, py + U / 2, 0.0, s)
+    info = {mat: {"name": f"{piece.id} {piece.label}", "color": tuple(int(v) for v in piece.rgb)}}
+    return bm.mesh(material_info=info, single_material=mat)
+
+
 def build_piece_mesh(piece: PieceType, model: VoxelModel, s: KitSettings) -> MeshSet:
+    if piece.axis == "g":
+        return build_figure_mesh(piece, model, s)
     U = s.unit_mm
     w, d = piece_extent(piece, s)
     bm = BoxModel()

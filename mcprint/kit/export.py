@@ -48,7 +48,11 @@ def write_kit(kit: Kit, plates: list[Plate], out_dir: Path, title: str, progress
     for p in kit.pieces:
         if p.mesh is None or not p.mesh.meshes:
             continue
-        name = f"{p.id}_{_safe(p.state.path)}_{p.length}x1_qty{p.count}.stl"
+        if p.axis == "g":
+            nx, nz = p.units_xz
+            name = f"{p.id}_{_safe(p.state.properties.get('id', 'mob'))}_figure_{nx}x{nz}x{p.units_y}_qty{p.count}.stl"
+        else:
+            name = f"{p.id}_{_safe(p.state.path)}_{p.length}x1_qty{p.count}.stl"
         files.append(write_stl(pieces_dir / name, p.mesh.merged(), header=f"mc-print-3d {p.id}"))
     plate_of: dict[str, list[int]] = {}
     for pl in plates:

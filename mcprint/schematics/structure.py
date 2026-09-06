@@ -6,6 +6,7 @@ import logging
 import numpy as np
 
 from .. import nbt
+from .entities import entity_to_compound, resolve_entities
 from .base import AIR, BlockState, PaletteBuilder, Schematic
 
 log = logging.getLogger(__name__)
@@ -71,6 +72,20 @@ def load_structure(root: nbt.Compound, source: str = "") -> Schematic:
     s = Schematic(width=width, height=height, length=length, palette=pb.states, blocks=grid,
                   format="structure", source=source, data_version=data_version)
     s.block_entities = block_entities
+    ents = root.get_list("entities")
+    if ents:
+        def _pos(tag):
+            p = tag.get_list("pos")
+            return [float(v) for v in p] if len(p) == 3 else None
+        tagged = []
+        for t in ents:
+            if not isinstance(t, nbt.Compound):
+                continue
+            c = nbt.Compound(t.get_compound("nbt"))
+            c["__pos"] = t.get_list("pos")
+            tagged.append(c)
+        s.entities = resolve_entities(tagged, (width, height, length), [(0.0, 0.0, 0.0)], s.warnings,
+                                      pos_key=lambda t: [float(v) for v in t.get_list("__pos")] if len(t.get_list("__pos")) == 3 else None)
     s.metadata = {"author": root.get_str("author", "")}
     s.author = root.get_str("author", "")
     return s
@@ -93,7 +108,7 @@ def save_structure(schem: Schematic, path: str) -> None:
         }))
     root = nbt.Compound({
         "size": nbt.List([nbt.Int(schem.width), nbt.Int(schem.height), nbt.Int(schem.length)], nbt.TAG_INT),
-        "entities": nbt.List([], nbt.TAG_COMPOUND),
+        "entities": nbt.List([entity_to_compound(e, "structure") for e in schem.entities], nbt.TAG_COMPOUND),
         "blocks": blocks,
         "palette": pal,
         "DataVersion": nbt.Int(schem.data_version or 3953),

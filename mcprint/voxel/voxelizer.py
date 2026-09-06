@@ -36,7 +36,7 @@ class VoxelSettings:
     alpha_threshold: int = 96            # texture alpha below this = empty
     cutout_dilation: int = 1             # grow opaque texture areas by this many texels (thin stems/wires stay printable)
     solid_textures: tuple[str, ...] = ("glass", "tinted_glass", "ice", "frosted_ice", "slime", "honey", "water", "lava", "leaves")
-    translucent_textures: tuple[str, ...] = ("glass", "ice", "honey_block", "slime_block", "water")   # kept as their own 'clear filament' color
+    translucent_textures: tuple[str, ...] = ("glass", "ice", "honey_block", "slime_block", "water", "portal")   # kept as their own 'clear filament' color
     translucent_as_solid: bool = True    # textures with many semi-transparent pixels are treated as opaque (stained glass, ice)
     include_fluids: bool = False
     unknown_policy: str = "cube"         # 'cube' | 'skip'
@@ -254,8 +254,12 @@ class BlockVoxelizer:
             u1, v1, u2, v2 = face.uv if face.uv is not None else _default_uv(fname, lo, hi)
             u = u1 + sx * (u2 - u1)
             v = v1 + sy * (v2 - v1)
-            opaque = self._is_forced_opaque(face.texture)
-            rgb, keep = self._sample_texture(face.texture, u, v, opaque)
+            if face.color is not None:
+                rgb = np.tile(np.asarray(face.color, dtype=np.uint8), (len(pts), 1))
+                keep = np.ones(len(pts), dtype=bool)
+            else:
+                opaque = self._is_forced_opaque(face.texture)
+                rgb, keep = self._sample_texture(face.texture, u, v, opaque)
             if rgb is None:
                 continue
             if face.tintindex >= 0:
@@ -360,8 +364,12 @@ class BlockVoxelizer:
                 u1, v1, u2, v2 = _default_uv(fname, lo, hi)
             u = u1 + sx * (u2 - u1)
             v = v1 + sy * (v2 - v1)
-            opaque = self._is_forced_opaque(face.texture)
-            rgb, keep = self._sample_texture(face.texture, u, v, opaque)
+            if face.color is not None:
+                rgb = np.tile(np.asarray(face.color, dtype=np.uint8), (len(pts), 1))
+                keep = np.ones(len(pts), dtype=bool)
+            else:
+                opaque = self._is_forced_opaque(face.texture)
+                rgb, keep = self._sample_texture(face.texture, u, v, opaque)
             if rgb is None:
                 rgb = np.tile(np.asarray(hashed_color(face.texture if face.texture != MISSING_TEXTURE else state.name), dtype=np.uint8), (len(pts), 1))
                 keep = np.ones(len(pts), dtype=bool)
@@ -530,6 +538,12 @@ class BlockVoxelizer:
         R = rotation_matrix("y", -shape.y_rotation)
         centre = np.array([8.0, 8.0, 8.0])
         Q = (P - centre) @ R + centre
+        if shape.elements and all(self.textures.get(f.texture) is not None
+                                  for el in shape.elements for f in el.faces.values() if f.color is None):
+            for el in shape.elements:
+                self._stamp_element(state, el, Q, out, 0.0, None)
+            self.fallback_states[str(state)] = shape.reason or reason
+            return BlockPattern(out.reshape(n, n, n), kind="fallback", note=shape.reason or reason)
         for (lo, hi), tex, col in shape.boxes:
             lo_a = np.asarray(lo, dtype=np.float64)
             hi_a = np.asarray(hi, dtype=np.float64)

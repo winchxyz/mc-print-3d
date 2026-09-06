@@ -7,6 +7,7 @@ import math
 import numpy as np
 
 from .. import nbt
+from .entities import entity_to_compound, resolve_entities
 from .base import AIR, BlockState, PaletteBuilder, Schematic
 
 log = logging.getLogger(__name__)
@@ -60,7 +61,13 @@ def load_litematic(root: nbt.Compound, source: str = "") -> Schematic:
     grid = np.zeros((height, length, width), dtype=np.int32)
     block_entities = []
     warnings = []
+    entities = []
     for rname, reg, (minx, miny, minz), (sx, sy, sz) in boxes:
+        ents = reg.get_list("Entities")
+        if ents:
+            px, py, pz = _vec(reg.get_compound("Position"))
+            # Litematica stores positions relative to the region's Position corner (not its min corner)
+            entities.extend(resolve_entities(ents, (width, height, length), [(float(gx0 - px), float(gy0 - py), float(gz0 - pz))], warnings))
         pal_list = reg.get_list("BlockStatePalette")
         states = []
         for entry in pal_list:
@@ -107,6 +114,7 @@ def load_litematic(root: nbt.Compound, source: str = "") -> Schematic:
     }
     s.block_entities = block_entities
     s.warnings = warnings
+    s.entities = entities
     return s
 
 
@@ -127,7 +135,7 @@ def save_litematic(schem: Schematic, path: str) -> None:
         "BlockStatePalette": pal,
         "BlockStates": longs,
         "TileEntities": nbt.List([], nbt.TAG_COMPOUND),
-        "Entities": nbt.List([], nbt.TAG_COMPOUND),
+        "Entities": nbt.List([entity_to_compound(e) for e in schem.entities], nbt.TAG_COMPOUND),
         "PendingBlockTicks": nbt.List([], nbt.TAG_COMPOUND),
         "PendingFluidTicks": nbt.List([], nbt.TAG_COMPOUND),
     })

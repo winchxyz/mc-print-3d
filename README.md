@@ -32,7 +32,8 @@ Existing converters treat every block as a cube, or need a resource pack and a l
 - Finds installations automatically: vanilla launcher, CurseForge, Prism / MultiMC / PolyMC, Modrinth App, ATLauncher
 - Loads the vanilla jar, every mod jar of the chosen instance (including nested jar-in-jar libraries) and the enabled resource packs
 - Resolves blockstates → variants / multipart → model parent chains → texture variables, exactly like the game
-- Understands Forge / NeoForge `obj` and `composite` model loaders; block-entity blocks (chests, beds, signs, banners, heads…) get sensible fallback shapes
+- Understands Forge / NeoForge `obj` and `composite` model loaders; chests and beds are rebuilt from their entity atlases (lid, latch, pillow, legs), other block-entity blocks (signs, banners, heads, shulker boxes) get shaped fallbacks
+- Mobs: creatures stored in the schematic are printed as figures from the game's entity models and skins, and you can place more yourself
 
 **Geometry**
 - Every block state is voxelized from its model elements at 2–32 sub-voxels per block (chosen automatically from block size and nozzle)
@@ -64,6 +65,11 @@ Plus a database of 140+ printers with bed sizes and slot counts, and detection o
 **Modes**
 - Style: textured relief, flat smooth faces, or plain cubes
 - Build: one solid model, or a modular kit of studded pieces with print plates, baseplate tiles and a layer-by-layer assembly guide
+
+**Mobs**
+- 27 vanilla mobs (creeper, zombie, skeleton, villager, enderman, iron golem, pig, cow, sheep, wolf, cat, spider, slime, ghast, players with custom skins…) built from the game's own ModelPart geometry and entity textures
+- Entities saved in `.schem`, `.litematic`, `.nbt`, `.schematic` and `.mcstructure` files are placed automatically, with their rotation, sheep color, slime size and pig/cow/wolf/cat variants
+- Extra mobs from the command line or the app; in kit mode each mob becomes one figure piece on a socketed base tile
 
 **Output**
 - 3MF with one part per filament and base materials (any slicer)
@@ -112,13 +118,47 @@ python -m mcprint convert castle.litematic --style flat            # smooth face
 python -m mcprint convert castle.litematic --style cubes           # plain cubes
 ```
 
+## Mobs
+
+![Printable mobs](docs/mobs.jpg)
+
+*Every printable mob rasterized at 16 voxels per block from the 1.21.11 entity textures: bee, bogged, cat, cave spider, chicken, cow, creeper, drowned, enderman, ghast, husk, iron golem, mooshroom, ocelot, pig, player (Steve), player slim (Alex), sheep, skeleton, slime, snow golem, spider, stray, villager, wither skeleton, wolf, zombie, plus a red sheep, a sheared sheep, a size-3 slime, a siamese cat and a snowy wolf.*
+
+![Cottage with mobs](docs/preview-mobs.png)
+
+*A `.litematic` with eight entities in the yard, converted as one 16-color model. Left to right: cow, wolf, creeper, villager, chicken, cat, pig, and a red sheep by the tree.*
+
+![Yard close-up](docs/preview-mobs-closeup.png)
+
+Mobs are built the way the game builds them: every `ModelPart` box with its `texOffs` UV layout, `PartPose` offsets and rotations (a pig's body is a rotated box, spider legs are angled), the renderer's mirror and the `180 − yaw` turn. Each sub-voxel inside a box is colored from the atlas face it is closest to, so skins map onto the figure exactly. Hat, jacket and sleeve layers are baked onto the body instead of printed as paper-thin shells; enderman eyes and the snow golem's pumpkin are extra layers. The slime's outer cube is a translucent "clear filament" color with the core and eyes inside it.
+
+- **From the schematic.** Entities are read from Sponge v2/v3, Litematica regions, structure files, MCEdit (`WEOrigin` aware) and `.mcstructure`. Position, yaw, sheep `Color`/`Sheared`, slime `Size` and `variant` tags are used; unsupported entity types (item frames, minecarts, mobs without a model yet) are listed as warnings.
+- **Placed by hand.** `--mob ID@X,Y,Z[,YAW]` in block coordinates (feet centre, relative to the schematic), repeatable; `sheep:red@…`, `slime:3@…`, `pig:cold@…`, `wolf:snowy@…`, `cat:siamese@…` pick variants; `--skin steve.png` uses your own 64×64 skin for `player` / `player_slim`; `--mob-scale 2` makes every mob twice the size; `--no-mobs` ignores schematic entities. The app has the same controls on the Schematic tab.
+- **Kit mode.** A mob is one piece: all of its cells as a single body on a base tile with a socket under every ground cell (no studs on a head). Figures print in their dominant color; use the solid build for full-color mobs.
+
+```bash
+python -m mcprint mobs                                                    # list ids, sizes, textures
+python -m mcprint convert village.litematic --mob creeper@5,1,7,90 --mob sheep:red@2,1,2
+python -m mcprint convert base.schem --mob player@3,1,3 --skin my_skin.png --mob-scale 1.5
+```
+
+| Kit figures from above | The same figures from below |
+|---|---|
+| ![Kit figures](docs/kit-figures.png) | ![Kit figures, underside](docs/kit-figures-bottom.png) |
+
+*Enderman, pig, villager, sheep, chicken, wolf, zombie, cow and creeper as single-color kit pieces, each on a base tile with one socket per ground cell.*
+
 ## Block catalog
 
 Every block state of Minecraft 1.21.11 (1,026 of them) rendered through the converter at 16 voxels per block with texel colors and 0.6 mm relief, from the game's own models and textures. Full sheets: [1](docs/catalog/blocks-1.jpg) · [2](docs/catalog/blocks-2.jpg) · [3](docs/catalog/blocks-3.jpg) · [4](docs/catalog/blocks-4.jpg).
 
 [![Block catalog, sheet 1](docs/catalog/blocks-1.jpg)](docs/catalog/blocks-1.jpg)
 
-Blocks the game draws with block-entity renderers (chests, beds, signs, banners, heads, shulker boxes, conduits) have no JSON geometry and are approximated by shaped boxes in their real colors; everything else is the real model.
+Blocks the game draws with block-entity renderers have no JSON geometry. Chests (single, double, trapped, ender, copper in every oxidation state) and beds are rebuilt from their entity atlases with the same boxes and UV layout the renderer uses, so the lid rim, latch, pillow, blanket and legs come out like in the game; signs, banners, heads, shulker boxes and conduits are shaped boxes in their real colors.
+
+[![Block entities and portals](docs/catalog/block-entities.jpg)](docs/catalog/block-entities.jpg)
+
+*Chests, beds, cauldrons (empty, water, lava), brewing stand with bottles, obsidian, crying obsidian, the nether portal as a translucent slab, end portal frame with and without its eye, end portal, end stone, enchanting table, furnace, anvil, respawn anchor and lodestone.*
 
 ## Screenshots
 
@@ -195,10 +235,10 @@ Print space: Minecraft X → X, Minecraft Z (south) → −Y, Minecraft Y (up) �
 | Format | Extension | Notes |
 |---|---|---|
 | MCEdit / Schematica / old WorldEdit | `.schematic` | numeric ids + metadata, `AddBlocks`, `SchematicaMapping` for mod blocks |
-| Sponge / WorldEdit 7+ / FAWE | `.schem` | versions 1–3, varint block data, palette states |
-| Litematica | `.litematic` | all regions merged, tightly packed bit arrays |
-| Structure block | `.nbt` | palette + block list; ponder scenes, datapacks |
-| Bedrock Edition | `.mcstructure` | little-endian NBT, block name and state translation |
+| Sponge / WorldEdit 7+ / FAWE | `.schem` | versions 1–3, varint block data, palette states, entities |
+| Litematica | `.litematic` | all regions merged, tightly packed bit arrays, entities per region |
+| Structure block | `.nbt` | palette + block list + entities; ponder scenes, datapacks |
+| Bedrock Edition | `.mcstructure` | little-endian NBT, block name and state translation, entities |
 | Axiom | `.bp` | header + 16³ paletted sections |
 | Archive | `.zip` | first schematic inside |
 
@@ -210,6 +250,7 @@ Print space: Minecraft X → X, Minecraft Z (south) → −Y, Minecraft Y (up) �
 | `mcprint/schematics/` | format loaders, legacy id table, block renames, Bedrock name mapping |
 | `mcprint/assets/` | installation discovery, jar/mod/pack stack, blockstate/model/texture resolution, tints, fallbacks, OBJ models |
 | `mcprint/voxel/` | voxelizer, texture relief, chunked grid, block-level cleanup, greedy mesher, connection inference |
+| `mcprint/mobs/` | vanilla entity models in ModelPart conventions, mob rasterizer, placement into the voxel grid |
 | `mcprint/color/` | k-means / filament assignment, filament library, catalog, slicer preset import |
 | `mcprint/export/` | STL, OBJ, 3MF writers, bed tiling |
 | `mcprint/printers/` | printer database, backends, discovery, profiles, slicer detection |
@@ -222,13 +263,14 @@ Print space: Minecraft X → X, Minecraft Z (south) → −Y, Minecraft Y (up) �
 .venv\Scripts\python -m pytest -q
 ```
 
-The suite (257 tests) covers NBT, every loader, the resolver, voxelizer, relief, mesher, exporters, quantizer and printer backends with mocked HTTP. Tests that need a real client jar are skipped when none is installed.
+The suite (279 tests) covers NBT, every loader, the resolver, voxelizer, relief, mesher, mobs, kit, exporters, quantizer and printer backends with mocked HTTP. Tests that need a real client jar are skipped when none is installed.
 
 ## Limitations
 
 - Bambu Lab AMS reading needs the printer's LAN access code and, on recent firmware, Developer/LAN mode. If Bambu Studio is running it may hold the discovery port; enter IP and serial manually then.
 - Texture relief is inferred for textures without height maps; a pattern that the analysis does not recognise as line-like stays flat (mode `dark` or `light` forces it).
 - Mod blocks rendered entirely in code (no JSON model, no OBJ) are approximated by a cube colored from their particle texture.
+- Mobs are printed in their default standing pose (zombie arms forward, villager arms crossed); baby mobs print at adult size, and horses, axolotls, allays, frogs, wardens and most other 2019+ mobs have no model yet.
 - The Bambu-flavoured 3MF project metadata is a best effort; the plain 3MF is the safe route for any slicer.
 
 ## License

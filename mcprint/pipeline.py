@@ -71,6 +71,7 @@ class Converter:
         self.resolver: Optional[ModelResolver] = None
         self.textures: Optional[TextureLoader] = None
         self.instance: Optional[Instance] = None
+        self.warnings: list[str] = []
 
     # ---- helpers -------------------------------------------------------------------------
     def progress(self, frac: float, msg: str) -> None:
@@ -165,7 +166,7 @@ class Converter:
                              cutout_dilation=s.cutout_dilation, solid_textures=tuple(s.solid_textures),
                              translucent_as_solid=s.translucent_as_solid, include_fluids=s.include_fluids,
                              unknown_policy=s.unknown_policy, relief_depth=s.relief_units(block_mm), relief_mode=s.relief_mode,
-                             translucent_textures=("glass", "ice", "honey_block", "slime_block", "water") if s.separate_glass else ())
+                             translucent_textures=("glass", "ice", "honey_block", "slime_block", "water", "portal") if s.separate_glass else ())
 
     def kit_settings(self, block_mm: float):
         from .kit import KitSettings
@@ -207,6 +208,14 @@ class Converter:
                     patterns[i] = vox.full_pattern(p.avg_rgb or (128, 128, 128))
         model = VoxelModel(blocks=schem.blocks.copy(), palette=list(schem.palette), patterns=patterns, resolution=vs.resolution, colors=colors,
                            relief_steps=vox.relief_steps)
+        # ---- mobs (schematic entities + user placed)
+        placements = self.mob_placements(schem)
+        if placements:
+            self.progress(0.52, f"Placing {len(placements)} mob(s)")
+            from .mobs import place_mobs
+            placed, mob_warnings = place_mobs(model, placements, vox, min_units=vs.min_thickness, alpha_threshold=vs.alpha_threshold)
+            stats["mobs"] = placed
+            model.warnings.extend(mob_warnings)
         stats["voxelize_s"] = round(time.time() - t0, 2)
         stats["relief_steps"] = vox.relief_steps
         stats["states"] = dict(vox.stats)
@@ -238,6 +247,51 @@ class Converter:
         stats["solid_voxels"] = int(sum(p.count for p in model.patterns) and np.sum([model.patterns[i].count for i in model.blocks.ravel()]))
         self.progress(0.6, f"Voxel model: X {x} x Y {y} x Z {z} blocks at {vs.resolution}³ per block")
         return model, stats
+
+    def mob_placements(self, schem: Schematic) -> list:
+        """Mobs to print: the schematic's entities (when enabled) plus ``settings.extra_mobs``."""
+        from .mobs import MobPlacement, mob_model, normalize_mob_id
+        s = self.settings
+        out: list = []
+        skipped: dict[str, int] = {}
+        specs: list[tuple[str, float, float, float, float, dict]] = []
+        if s.include_mobs:
+            for e in schem.entities:
+                specs.append((e.id, e.x, e.y, e.z, e.yaw, dict(e.props)))
+        for m in s.extra_mobs:
+            try:
+                specs.append((str(m["id"]), float(m.get("x", 0)), float(m.get("y", 0)), float(m.get("z", 0)), float(m.get("yaw", 0)), dict(m.get("props") or {})))
+            except (KeyError, TypeError, ValueError):
+                continue
+        for mid, x, y, z, yaw, props in specs:
+            if normalize_mob_id(mid) in ("player", "player_slim") and s.player_skin and "texture" not in props:
+                props["texture"] = self._skin_resource(s.player_skin)
+            model = mob_model(mid, props)
+            if model is None:
+                key = normalize_mob_id(mid)
+                skipped[key] = skipped.get(key, 0) + 1
+                continue
+            out.append(MobPlacement(model, x, y, z, yaw, scale=float(s.mob_scale or 1.0), name=str(props.get("name", ""))))
+        for key, n in sorted(skipped.items()):
+            self.warnings.append(f"{n} x {key}: no printable model for this entity type, skipped")
+        return out
+
+    def _skin_resource(self, path: str) -> str:
+        """Register a skin PNG from disk as an overlay asset and return its resource name."""
+        p = Path(path)
+        if not p.exists() or self.textures is None:
+            return "minecraft:entity/player/wide/steve"
+        res = "mcprint:skin/" + "".join(ch if ch.isalnum() else "_" for ch in p.stem)
+        try:
+            data = p.read_bytes()
+            from .assets.textures import _decode_png
+            arr = _decode_png(data)
+            if arr is not None:
+                self.textures._cache[res] = arr
+                return res
+        except Exception as exc:
+            log.warning("skin %s: %s", path, exc)
+        return "minecraft:entity/player/wide/steve"
 
     # ---- stage 4: colors -----------------------------------------------------------------
     def palette(self) -> PrintPalette:
@@ -321,6 +375,8 @@ class Converter:
         block_mm = self.compute_block_mm(schem)
         model, stats = self.build_model(schem, block_mm)
         res.model, res.stats, res.block_mm, res.resolution = model, stats, block_mm, model.resolution
+        res.warnings.extend(model.warnings)
+        res.warnings.extend(self.warnings)
         res.timings["voxelize"] = time.time() - t0
         self.progress(0.6, "Planning colors")
         plan = self.plan_colors(model)

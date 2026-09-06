@@ -169,6 +169,57 @@ class MainWindow(QMainWindow):
         gl.addWidget(self.block_table)
         lay.addWidget(g)
 
+        m = QGroupBox("Mobs (printed as figures)")
+        ml = QVBoxLayout(m)
+        self.include_mobs = QCheckBox("Print mobs stored in the schematic (entities)")
+        self.include_mobs.setChecked(self.settings.include_mobs)
+        self.include_mobs.toggled.connect(lambda _v: self._mobs_changed())
+        ml.addWidget(self.include_mobs)
+        self.entity_label = QLabel("No mobs in the loaded schematic.")
+        self.entity_label.setWordWrap(True)
+        ml.addWidget(self.entity_label)
+        self.mob_list = QListWidget()
+        self.mob_list.setMaximumHeight(90)
+        ml.addWidget(self.mob_list)
+        row = QHBoxLayout()
+        from ..mobs import MOB_IDS
+        self.mob_id = QComboBox()
+        for mid in MOB_IDS:
+            self.mob_id.addItem(mid.replace("_", " "), mid)
+        row.addWidget(self.mob_id)
+        self.mob_x = QDoubleSpinBox(); self.mob_y = QDoubleSpinBox(); self.mob_z = QDoubleSpinBox(); self.mob_yaw = QDoubleSpinBox()
+        for sp, name in ((self.mob_x, "X"), (self.mob_y, "Y"), (self.mob_z, "Z")):
+            sp.setRange(-512, 4096); sp.setDecimals(1); sp.setSingleStep(1.0); sp.setPrefix(name + " ")
+            row.addWidget(sp)
+        self.mob_yaw.setRange(-180, 180); sp = self.mob_yaw; sp.setDecimals(0); sp.setSingleStep(45); sp.setPrefix("yaw "); sp.setSuffix("°")
+        row.addWidget(self.mob_yaw)
+        add_mob = QPushButton("Add")
+        add_mob.clicked.connect(self._add_mob)
+        row.addWidget(add_mob)
+        rm_mob = QPushButton("Remove")
+        rm_mob.clicked.connect(self._remove_mob)
+        row.addWidget(rm_mob)
+        ml.addLayout(row)
+        row = QHBoxLayout()
+        self.mob_scale = QDoubleSpinBox()
+        self.mob_scale.setRange(0.1, 10.0); self.mob_scale.setDecimals(2); self.mob_scale.setSingleStep(0.25)
+        self.mob_scale.setValue(self.settings.mob_scale)
+        self.mob_scale.setPrefix("scale ×")
+        row.addWidget(self.mob_scale)
+        self.skin_btn = QPushButton("Player skin…")
+        self.skin_btn.clicked.connect(self._pick_skin)
+        row.addWidget(self.skin_btn)
+        self.skin_label = QLabel(Path(self.settings.player_skin).name if self.settings.player_skin else "Steve")
+        row.addWidget(self.skin_label, 1)
+        apply_mobs = QPushButton("Apply")
+        apply_mobs.setToolTip("Rebuild the model with the mobs above")
+        apply_mobs.clicked.connect(self.convert)
+        row.addWidget(apply_mobs)
+        ml.addLayout(row)
+        for mspec in self.settings.extra_mobs:
+            self._add_mob_item(mspec)
+        lay.addWidget(m)
+
         a = QGroupBox("Minecraft assets (textures & models)")
         al = QVBoxLayout(a)
         self.instance_combo = QComboBox()
@@ -717,6 +768,9 @@ class MainWindow(QMainWindow):
         s.fill_cavities = self.fill.isChecked()
         s.base_plate_mm = self.base.value()
         s.infer_connections = self.connections.isChecked()
+        s.include_mobs = self.include_mobs.isChecked()
+        s.extra_mobs = [self.mob_list.item(i).data(Qt.UserRole) for i in range(self.mob_list.count())]
+        s.mob_scale = self.mob_scale.value()
         s.solid_textures = [t.strip() for t in self.solid_tex.text().split(",") if t.strip()]
         s.color_mode = self.color_mode.currentData() or "block"
         s.max_colors = self.max_colors.value()
@@ -802,6 +856,7 @@ class MainWindow(QMainWindow):
             self.block_table.setItem(r, 0, QTableWidgetItem(str(st)))
             self.block_table.setItem(r, 1, QTableWidgetItem(f"{c:,}"))
         self.block_table.resizeColumnToContents(1)
+        self._show_entities(schem)
         self._busy(False, f"Loaded {schem.block_count:,} blocks")
         self.log_message.emit(f"Loaded {self.schematic_path}: X {x} x Y {y} x Z {z}, {schem.block_count:,} blocks")
         mod_ns = [n for n in ns if n != "minecraft"]
@@ -809,6 +864,52 @@ class MainWindow(QMainWindow):
             self._suggest_instance(mod_ns)
         # go straight to a preview
         self.convert()
+
+    def _show_entities(self, schem: Schematic) -> None:
+        from ..mobs import mob_model, normalize_mob_id
+        counts: dict[str, int] = {}
+        unsupported: dict[str, int] = {}
+        for e in schem.entities:
+            key = normalize_mob_id(e.id)
+            (counts if mob_model(e.id) is not None else unsupported)[key] = (counts if mob_model(e.id) is not None else unsupported).get(key, 0) + 1
+        if not schem.entities:
+            self.entity_label.setText("No mobs in the loaded schematic.")
+            return
+        txt = ", ".join(f"{n} × {k.replace('_', ' ')}" for k, n in sorted(counts.items(), key=lambda kv: -kv[1]))
+        msg = f"In the schematic: {txt}" if counts else "In the schematic: no printable mobs"
+        if unsupported:
+            msg += "  ·  skipped (no model): " + ", ".join(f"{n} × {k}" for k, n in sorted(unsupported.items(), key=lambda kv: -kv[1])[:8])
+        self.entity_label.setText(msg)
+
+    def _add_mob_item(self, spec: dict) -> None:
+        props = spec.get("props") or {}
+        extra = f" {props}" if props else ""
+        item = QListWidgetItem(f"{spec['id']} @ X {spec['x']:g}  Y {spec['y']:g}  Z {spec['z']:g}  yaw {spec.get('yaw', 0):g}°{extra}")
+        item.setData(Qt.UserRole, dict(spec))
+        self.mob_list.addItem(item)
+
+    def _add_mob(self) -> None:
+        spec = {"id": self.mob_id.currentData(), "x": self.mob_x.value(), "y": self.mob_y.value(), "z": self.mob_z.value(),
+                "yaw": self.mob_yaw.value(), "props": {}}
+        self._add_mob_item(spec)
+        self._mobs_changed()
+
+    def _remove_mob(self) -> None:
+        for item in self.mob_list.selectedItems():
+            self.mob_list.takeItem(self.mob_list.row(item))
+        self._mobs_changed()
+
+    def _mobs_changed(self) -> None:
+        self._settings_from_ui()
+
+    def _pick_skin(self) -> None:
+        path, _f = QFileDialog.getOpenFileName(self, "Player skin (64x64 PNG)", "", "PNG images (*.png)")
+        if path:
+            self.settings.player_skin = path
+            self.skin_label.setText(Path(path).name)
+        elif self.settings.player_skin:
+            self.settings.player_skin = ""
+            self.skin_label.setText("Steve")
 
     def _suggest_instance(self, namespaces: list[str]) -> None:
         conv = Converter(self.settings)

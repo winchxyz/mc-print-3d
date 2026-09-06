@@ -28,6 +28,7 @@ class Face:
     rotation: int = 0
     tintindex: int = -1
     ref: str = ""                                  # raw reference from the JSON ('#side'), kept for parent chains
+    color: Optional[tuple[int, int, int]] = None   # flat color instead of a texture (synthetic block-entity shapes)
 
 
 @dataclass

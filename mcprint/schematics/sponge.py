@@ -7,6 +7,7 @@ import numpy as np
 
 from .. import nbt
 from .base import AIR, BlockState, PaletteBuilder, Schematic
+from .entities import entity_to_compound, resolve_entities
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +90,9 @@ def load_sponge(root: nbt.Compound, source: str = "") -> Schematic:
     s.author = meta.get_str("Author", "")
     s.metadata = {k: (str(v) if not isinstance(v, (nbt.Compound, list, np.ndarray)) else "…") for k, v in meta.items()}
     s.block_entities = list(block_entities) if block_entities else []
+    ents = inner.get_list("Entities")
+    if ents:
+        s.entities = resolve_entities(ents, (width, height, length), [(0.0, 0.0, 0.0), tuple(float(v) for v in off)], s.warnings)
     if missing:
         s.warnings.append(f"{missing} palette indices without a palette entry were treated as air")
     return s
@@ -124,9 +128,11 @@ def save_sponge(schem: Schematic, path: str, version: int = 2) -> None:
     }
     if version >= 3:
         root = nbt.Compound({"Schematic": nbt.Compound({**common, "Blocks": nbt.Compound({
-            "Palette": palette, "Data": data, "BlockEntities": nbt.List([], nbt.TAG_COMPOUND)})})})
+            "Palette": palette, "Data": data, "BlockEntities": nbt.List([], nbt.TAG_COMPOUND)}),
+            "Entities": nbt.List([entity_to_compound(e, "sponge3") for e in schem.entities], nbt.TAG_COMPOUND)})})
         nbt.dump(root, path, name="")
     else:
         root = nbt.Compound({**common, "PaletteMax": nbt.Int(len(schem.palette)), "Palette": palette,
-                             "BlockData": data, "BlockEntities": nbt.List([], nbt.TAG_COMPOUND)})
+                             "BlockData": data, "BlockEntities": nbt.List([], nbt.TAG_COMPOUND),
+                             "Entities": nbt.List([entity_to_compound(e) for e in schem.entities], nbt.TAG_COMPOUND)})
         nbt.dump(root, path, name="Schematic")

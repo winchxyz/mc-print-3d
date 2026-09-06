@@ -86,7 +86,8 @@ class VoxelModel:
         trans_flags = self.colors.is_translucent()
         out = []
         for p in self.patterns:
-            if p.is_empty or p.avg_rgb is None:
+            if p.is_empty or p.avg_rgb is None or p.kind == "mob":
+                # mobs are figures: their look *is* the texture, keep texel colors in every color mode
                 out.append(p)
                 continue
             col = p.colors

@@ -48,6 +48,11 @@ class ConversionSettings:
     crop: bool = True
     infer_connections: bool = True
     rotate_deg: int = 0                       # rotate the print around Z (0/90/180/270)
+    # ---- mobs -------------------------------------------------------------------------
+    include_mobs: bool = True                 # print mobs stored in the schematic (entities)
+    extra_mobs: list[dict] = field(default_factory=list)   # [{id, x, y, z, yaw, props}] placed by the user
+    mob_scale: float = 1.0                    # extra scale for every mob (1 = game size)
+    player_skin: str = ""                     # PNG used for 'player' mobs (64x64 skin); empty = Steve
     # ---- colors -----------------------------------------------------------------------
     color_mode: str = "block"                 # 'block' (flat color per block type) | 'texel' (per texture pixel) | 'single'
     max_colors: int = 4                       # clusters / filament slots

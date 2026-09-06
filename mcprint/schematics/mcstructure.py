@@ -6,6 +6,7 @@ import logging
 import numpy as np
 
 from .. import nbt
+from .entities import resolve_entities
 from .base import AIR, BlockState, PaletteBuilder, Schematic
 
 log = logging.getLogger(__name__)
@@ -78,4 +79,7 @@ def load_mcstructure(root: nbt.Compound, source: str = "") -> Schematic:
     s = Schematic(width=width, height=height, length=length, palette=pb.states, blocks=grid,
                   format="mcstructure", source=source, offset=off)
     s.metadata = {"format_version": root.get_int("format_version", 0)}
+    ents = structure.get_list("entities")
+    if ents:
+        s.entities = resolve_entities(ents, (width, height, length), [tuple(float(v) for v in off), (0.0, 0.0, 0.0)], s.warnings)
     return s

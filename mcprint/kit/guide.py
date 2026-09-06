@@ -17,7 +17,8 @@ def write_parts_csv(kit: Kit, path: Path, plate_of: dict[str, list[int]]) -> Pat
         for p in kit.pieces:
             fp = kit.footprints.get(p.id, (0, 0, 0))
             mat = kit.material_info.get(p.material, {})
-            w.writerow([p.id, str(p.state), f"{p.length}x1", p.axis, p.count, to_hex(p.rgb), mat.get("name", p.material),
+            size = f"{p.units_xz[0]}x{p.units_xz[1]}x{p.units_y}" if p.axis == "g" else f"{p.length}x1"
+            w.writerow([p.id, p.label if p.axis == "g" else str(p.state), size, p.axis, p.count, to_hex(p.rgb), mat.get("name", p.material),
                         int(p.has_stud), int(p.has_socket), int(p.base_tile), f"{fp[0]:.1f}", f"{fp[1]:.1f}", f"{fp[2]:.1f}",
                         " ".join(str(i) for i in plate_of.get(p.id, []))])
     return path
@@ -70,21 +71,39 @@ svg{{background:#fff;border:1px solid #bbb}} .note{{color:#555;font-size:13px}}
     # layer maps
     parts.append("<h2>Layer maps</h2><p class='note'>Top view. X runs left to right, Z (Minecraft south) runs top to bottom, exactly like the schematic seen from above. Layer 1 sits on the baseplate.</p>")
     layers = kit.layers()
-    ghosts: dict[int, list] = {}
+    ghosts: dict[int, list] = {}            # layer -> [(placement, dx, dz)]
     for pl in kit.placements:
+        if pl.piece.axis == "g":
+            for dx, dy, dz in pl.piece.cells:
+                if dy > 0:
+                    ghosts.setdefault(pl.y + dy, []).append((pl, dx, dz))
+            continue
         for k in range(1, pl.units_y):
-            ghosts.setdefault(pl.y + k, []).append(pl)
+            ghosts.setdefault(pl.y + k, []).append((pl, 0, 0))
     all_layers = sorted(set(layers) | set(ghosts))
     for y in all_layers:
         parts.append(f"<div class='layer'><h3>Layer {y + 1}</h3>")
         parts.append(f"<svg width='{X * cell + 1}' height='{Z * cell + 1}' viewBox='0 0 {X * cell + 1} {Z * cell + 1}'>")
-        for pl in ghosts.get(y, []):
-            x0, y0 = pl.x * cell, pl.z * cell
+        for pl, gdx, gdz in ghosts.get(y, []):
+            x0, y0 = (pl.x + gdx) * cell, (pl.z + gdz) * cell
             parts.append(f"<rect x='{x0 + 0.5}' y='{y0 + 0.5}' width='{cell}' height='{cell}' fill='{to_hex(pl.piece.rgb)}' fill-opacity='0.35' stroke='#333' stroke-dasharray='3,2'/>")
             if cell >= 14:
                 parts.append(f"<text x='{x0 + cell / 2}' y='{y0 + cell / 2 + 4}' font-size='{max(7, cell * 0.38):.0f}' text-anchor='middle' fill='#333'>↑{pl.piece.id[1:].lstrip('0')}</text>")
         for pl in layers.get(y, []):
             p = pl.piece
+            if p.axis == "g":
+                col = to_hex(p.rgb)
+                txt = contrast_text_color(p.rgb)
+                for dx, dy, dz in p.cells:
+                    if dy:
+                        continue
+                    cx, cy = (pl.x + dx) * cell, (pl.z + dz) * cell
+                    parts.append(f"<rect x='{cx + 0.5}' y='{cy + 0.5}' width='{cell}' height='{cell}' fill='{col}' stroke='#333' stroke-width='1'/>")
+                    parts.append(f"<rect x='{cx + 2.5}' y='{cy + 2.5}' width='{cell - 4}' height='{cell - 4}' fill='none' stroke='{txt}' stroke-dasharray='1,2' stroke-width='1'/>")
+                gx = min(dx for dx, dy, dz in p.cells if dy == 0); gz = min(dz for dx, dy, dz in p.cells if dy == 0)
+                if cell >= 14:
+                    parts.append(f"<text x='{(pl.x + gx) * cell + cell / 2}' y='{(pl.z + gz) * cell + cell / 2 + 4}' font-size='{max(7, cell * 0.42):.0f}' text-anchor='middle' fill='{txt}'>{p.id[1:].lstrip('0') or '0'}</text>")
+                continue
             w_units, d_units = (p.length, 1) if p.axis == "x" else (1, p.length)
             if p.axis == "y":
                 w_units, d_units = 1, 1
@@ -105,7 +124,8 @@ svg{{background:#fff;border:1px solid #bbb}} .note{{color:#555;font-size:13px}}
             parts.append(f"<line x1='0' y1='{j * cell + 0.5}' x2='{X * cell}' y2='{j * cell + 0.5}' stroke='#e2e2e2' stroke-width='0.5'/>")
         parts.append("</svg></div>")
     parts.append("<p class='note'>Numbers are piece ids without the leading P; dashed outlines mark detailed (non-cube) pieces whose orientation follows the block's facing in the schematic. "
-                 "A faded cell with ↑ belongs to a two-block-tall piece (door, tall plant) placed on the layer below.</p>")
+                 "A faded cell with ↑ belongs to a two-block-tall piece (door, tall plant) or a mob figure placed on the layer below; "
+                 "figures (dotted outline) are one piece with a socket under every ground cell.</p>")
     parts.append("</body></html>")
     path.write_text("\n".join(parts), encoding="utf-8")
     return path

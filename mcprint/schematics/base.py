@@ -109,6 +109,7 @@ class Schematic:
     metadata: dict = field(default_factory=dict)
     block_entities: list = field(default_factory=list)   # raw compounds (kept for reference / future use)
     warnings: list[str] = field(default_factory=list)
+    entities: list = field(default_factory=list)         # mcprint.schematics.entities.Entity (mobs, positions relative to origin)
 
     # -- convenience --------------------------------------------------------------------
     @property
@@ -148,6 +149,8 @@ class Schematic:
                       format=self.format, source=self.source, name=self.name, author=self.author,
                       data_version=self.data_version, offset=(self.offset[0] + x0, self.offset[1] + y0, self.offset[2] + z0),
                       metadata=dict(self.metadata), block_entities=list(self.block_entities), warnings=list(self.warnings))
+        from .entities import Entity
+        s.entities = [Entity(e.id, e.x - x0, e.y - y0, e.z - z0, e.yaw, dict(e.props)) for e in self.entities]
         return s
 
     def compact_palette(self) -> "Schematic":
