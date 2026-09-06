@@ -89,8 +89,13 @@ Plus a database of 140+ printers with bed sizes and slot counts, and detection o
 
 ### Modular kit
 
-![Kit pieces](docs/kit-pieces.png)
-![Kit pieces, underside](docs/kit-pieces-bottom.png)
+![Cottage kit, exploded by layer](docs/kit-exploded.png)
+
+*The cottage as a kit, layers lifted apart: bars alternate direction every layer, every unit carries a stud, the first layer sits on a studded baseplate.*
+
+| Pieces, textured, from above | The same pieces from below |
+|---|---|
+| ![Kit pieces](docs/kit-pieces.png) | ![Kit pieces, underside](docs/kit-pieces-bottom.png) |
 
 - One block = one unit (the block size). Studs are square, half a unit wide with a stepped chamfer; sockets have a configurable clearance (0.15 mm per side by default) and an entry chamfer.
 - Runs of identical full-cube blocks merge into bars up to N units long, alternating direction every layer so walls interlock like brickwork.

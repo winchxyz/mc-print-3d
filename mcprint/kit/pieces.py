@@ -139,11 +139,18 @@ def extract_pieces(model: VoxelModel, plan: ColorPlan, settings: KitSettings) ->
 
     def material_of(i: int) -> tuple[int, tuple[int, int, int]]:
         p = pats[i]
-        m = int(plan.lut[p.dominant]) if p.dominant < len(plan.lut) else 0
+        color_idx = int(p.dominant)
+        if is_full[i]:
+            # a cube piece shows its top most: use the top-face color (grass pieces are green, not dirt-brown)
+            top = p.colors[-1]
+            vals, counts = np.unique(top[top != 0], return_counts=True)
+            if len(vals):
+                color_idx = int(vals[np.argmax(counts)])
+        m = int(plan.lut[color_idx]) if color_idx < len(plan.lut) else 0
         if m == 0:
             # unassigned / skipped color: fall back to nearest material by average color
             m = min(plan.materials, key=lambda k: sum((a - b) ** 2 for a, b in zip(plan.materials[k].rgb, p.avg_rgb or (128, 128, 128)))) if plan.materials else 0
-        rgb = plan.materials[m].rgb if m in plan.materials else tuple(int(v) for v in pal_rgb[p.dominant])
+        rgb = plan.materials[m].rgb if m in plan.materials else tuple(int(v) for v in pal_rgb[color_idx])
         return m, tuple(int(v) for v in rgb)
 
     kit = Kit(settings=settings, size_blocks=(X, Y, Z), material_info=plan.material_info())
