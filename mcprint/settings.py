@@ -25,6 +25,15 @@ class ConversionSettings:
     alpha_threshold: int = 96
     relief_mm: float = 0.5                    # surface relief carved from texture pixels (bricks, planks...); 0 = off
     relief_mode: str = "auto"                 # auto | heightmap | pattern | dark | light
+    style: str = "textured"                   # 'textured' (relief) | 'flat' (smooth faces) | 'cubes' (every block a plain cube)
+    build_type: str = "solid"                 # 'solid' (one model) | 'kit' (modular pieces with studs and sockets)
+    # ---- modular kit ------------------------------------------------------------------
+    kit_fit_mm: float = 0.15                  # stud/socket clearance per side
+    kit_max_len: int = 6                      # longest merged bar (units)
+    kit_textured: bool = False                # keep textures/relief on kit pieces
+    kit_baseplate: bool = True
+    kit_detailed: bool = True                 # non-cube blocks keep their geometry (else cubes)
+    kit_alternate: bool = True                # alternate merge direction per layer (brick bond)
     # ---- content -----------------------------------------------------------------------
     include_fluids: bool = False
     unknown_policy: str = "cube"              # 'cube' | 'skip' for blocks without usable models
@@ -71,6 +80,8 @@ class ConversionSettings:
         return float(self.min_thickness_mm / bm * 16.0)
 
     def relief_units(self, block_mm: Optional[float] = None) -> float:
+        if self.style != "textured":
+            return 0.0
         bm = block_mm or self.block_mm
         return float(max(0.0, self.relief_mm) / bm * 16.0)
 

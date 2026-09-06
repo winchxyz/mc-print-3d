@@ -43,6 +43,14 @@ def _add_convert_args(p: argparse.ArgumentParser) -> None:
     g.add_argument("--no-dilate", action="store_true", help="do not thicken thin texture features")
     g.add_argument("--relief", type=float, help="surface relief depth in mm carved from textures (bricks, planks...); 0 = flat faces (default 0.5)")
     g.add_argument("--relief-mode", choices=["auto", "heightmap", "pattern", "dark", "light"], help="how texels map to depth (default auto)")
+    g.add_argument("--style", choices=["textured", "flat", "cubes"], help="textured = relief from textures (default); flat = smooth faces, no relief; cubes = every block a plain cube")
+    g = p.add_argument_group("modular kit")
+    g.add_argument("--kit", action="store_true", help="build a modular kit: pieces with studs/sockets, print plates, baseplate and assembly guide")
+    g.add_argument("--kit-fit", type=float, help="stud/socket clearance per side in mm (default 0.15)")
+    g.add_argument("--kit-max-len", type=int, help="longest merged bar in blocks (default 6)")
+    g.add_argument("--kit-textured", action="store_true", help="keep textures and relief on kit pieces")
+    g.add_argument("--kit-cubes", action="store_true", help="turn non-cube blocks (stairs, fences...) into plain cubes in the kit")
+    g.add_argument("--no-baseplate", action="store_true", help="do not generate baseplate tiles")
     g = p.add_argument_group("colors")
     g.add_argument("--color-mode", choices=["block", "texel", "single", "full"], help="block = flat color per block type (default), texel = per texture pixel")
     g.add_argument("--colors", type=int, help="number of colors / filament slots (default 4)")
@@ -92,6 +100,20 @@ def _settings_from_args(a: argparse.Namespace) -> ConversionSettings:
         s.relief_mm = max(0.0, a.relief)
     if a.relief_mode:
         s.relief_mode = a.relief_mode
+    if a.style:
+        s.style = a.style
+    if a.kit:
+        s.build_type = "kit"
+    if a.kit_fit is not None:
+        s.kit_fit_mm = a.kit_fit
+    if a.kit_max_len:
+        s.kit_max_len = a.kit_max_len
+    if a.kit_textured:
+        s.kit_textured = True
+    if a.kit_cubes:
+        s.kit_detailed = False
+    if a.no_baseplate:
+        s.kit_baseplate = False
     if a.color_mode:
         s.color_mode = a.color_mode
     if a.colors:
@@ -189,6 +211,9 @@ def cmd_convert(a: argparse.Namespace) -> int:
     print(f"Print size: {res.size_text()}")
     st = res.stats
     print(f"Block types: {st.get('states')}")
+    if st.get("kit"):
+        k = st["kit"]
+        print(f"Kit: {k['pieces']} pieces of {k['types']} types on {k['plates']} plates, {k['baseplates']} baseplate tile(s)")
     if st.get("fallback_states"):
         print(f"Fallback shapes used for {len(st['fallback_states'])} block types (e.g. {list(st['fallback_states'])[:3]})")
     if st.get("missing_blockstates"):

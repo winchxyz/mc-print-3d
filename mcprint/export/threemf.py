@@ -45,8 +45,12 @@ def _mesh_xml(obj_id: int, mesh: Mesh, pid: Optional[int], pindex: Optional[int]
 
 
 def write_3mf(path: str | Path, meshes: MeshSet, title: str = "mc-print-3d model",
-              flavor: str = "generic") -> Path:
-    """Write a 3MF.  flavor='generic' (any slicer) or 'bambu' (adds Bambu/Orca project metadata)."""
+              flavor: str = "generic", assembly: bool = True) -> Path:
+    """Write a 3MF.  flavor='generic' (any slicer) or 'bambu' (adds Bambu/Orca project metadata).
+
+    ``assembly=True`` groups all meshes into one multi-part object (parts stay aligned);
+    ``assembly=False`` makes every mesh an independent build item (kit plates: separate objects).
+    """
     path = Path(path)
     if path.suffix.lower() != ".3mf":
         path = path.with_suffix(".3mf")
@@ -59,12 +63,14 @@ def write_3mf(path: str | Path, meshes: MeshSet, title: str = "mc-print-3d model
         mat_lines.append(f'   <base name="{escape(str(info.get("name") or m.name or f"material_{m.material}"))}" displaycolor="{hexcol}"/>')
     objects = []
     comp = []
+    ids = []
     next_id = 2
     for i, m in enumerate(ms):
         info = meshes.materials.get(m.material, {})
-        name = str(info.get("name") or m.name or f"material_{m.material}")
+        name = str(m.name or info.get("name") or f"material_{m.material}") if not assembly else str(info.get("name") or m.name or f"material_{m.material}")
         objects.append(_mesh_xml(next_id, m, 1, i, name))
         comp.append(f'    <component objectid="{next_id}"/>')
+        ids.append(next_id)
         next_id += 1
     asm_id = next_id
     xml = [
@@ -76,14 +82,14 @@ def write_3mf(path: str | Path, meshes: MeshSet, title: str = "mc-print-3d model
         '  <basematerials id="1">\n', "\n".join(mat_lines), "\n  </basematerials>\n",
         "".join(objects),
     ]
-    if len(ms) > 1:
+    if assembly and len(ms) > 1:
         xml.append(f'  <object id="{asm_id}" type="model" name="{escape(title)}">\n   <components>\n' + "\n".join(comp) + "\n   </components>\n  </object>\n")
-        build_id = asm_id
+        build_ids = [asm_id]
     else:
-        build_id = 2 if ms else asm_id
+        build_ids = ids
     xml.append(" </resources>\n <build>\n")
-    if ms:
-        xml.append(f'  <item objectid="{build_id}"/>\n')
+    for bid in build_ids:
+        xml.append(f'  <item objectid="{bid}"/>\n')
     xml.append(" </build>\n</model>\n")
     model_xml = "".join(xml)
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as z:
@@ -91,7 +97,7 @@ def write_3mf(path: str | Path, meshes: MeshSet, title: str = "mc-print-3d model
         z.writestr("_rels/.rels", RELS)
         z.writestr("3D/3dmodel.model", model_xml)
         if flavor == "bambu":
-            z.writestr("Metadata/model_settings.config", _bambu_model_settings(meshes, asm_id if len(ms) > 1 else build_id, title))
+            z.writestr("Metadata/model_settings.config", _bambu_model_settings(meshes, build_ids[0] if build_ids else asm_id, title))
             z.writestr("Metadata/project_settings.config", _bambu_project_settings(meshes))
     return path
 

@@ -47,6 +47,8 @@ class ConversionResult:
     block_mm: float = 0.0
     resolution: int = 0
     timings: dict = field(default_factory=dict)
+    kit: object = None                          # mcprint.kit.Kit when build_type == 'kit'
+    plates: list = field(default_factory=list)
 
     @property
     def size_mm(self) -> tuple[float, float, float]:
@@ -164,6 +166,15 @@ class Converter:
                              translucent_as_solid=s.translucent_as_solid, include_fluids=s.include_fluids,
                              unknown_policy=s.unknown_policy, relief_depth=s.relief_units(block_mm), relief_mode=s.relief_mode)
 
+    def kit_settings(self, block_mm: float):
+        from .kit import KitSettings
+        s = self.settings
+        bed = tuple(float(v) for v in (s.bed_mm or [256.0, 256.0, 256.0]))
+        return KitSettings(unit_mm=block_mm, fit_tolerance_mm=s.kit_fit_mm, max_piece_len=max(1, int(s.kit_max_len)),
+                           alternate_layers=s.kit_alternate, textured=bool(s.kit_textured and s.style == "textured"),
+                           detailed=s.kit_detailed, skip_non_cube=False, baseplate=s.kit_baseplate,
+                           bed_mm=bed, bed_margin_mm=s.bed_margin_mm)
+
     def build_model(self, schem: Schematic, block_mm: Optional[float] = None) -> tuple[VoxelModel, dict]:
         if self.resolver is None or self.textures is None:
             self.build_assets(schematic=schem)
@@ -189,6 +200,10 @@ class Converter:
                 self.check_cancel()
                 self.progress(0.12 + 0.4 * i / max(total, 1), f"Voxelizing block types {i + 1}/{total}: {st.path}")
             patterns.append(vox.voxelize(st))
+        if self.settings.style == "cubes" or (self.settings.build_type == "kit" and not self.settings.kit_detailed):
+            for i, p in enumerate(patterns):
+                if i and not p.is_empty and not p.is_full:
+                    patterns[i] = vox.full_pattern(p.avg_rgb or (128, 128, 128))
         model = VoxelModel(blocks=schem.blocks.copy(), palette=list(schem.palette), patterns=patterns, resolution=vs.resolution, colors=colors,
                            relief_steps=vox.relief_steps)
         stats["voxelize_s"] = round(time.time() - t0, 2)
@@ -204,7 +219,7 @@ class Converter:
         if self.settings.remove_islands:
             removed = remove_islands(model, self.settings.island_min_blocks, self.settings.keep_ground_only)
             stats["islands_removed_blocks"] = removed
-        if self.settings.fill_cavities:
+        if self.settings.fill_cavities and self.settings.build_type != "kit":
             filled = fill_cavities(model, full)
             stats["cavity_blocks_filled"] = filled
         if self.settings.base_plate_mm > 0:
@@ -309,7 +324,17 @@ class Converter:
         plan = self.plan_colors(model)
         res.plan = plan
         t1 = time.time()
-        if self.settings.split_to_bed and self.settings.bed_mm:
+        if self.settings.build_type == "kit":
+            res.meshes = self.mesh(model, plan, block_mm)
+            from .kit import build_kit, write_kit
+            kit, plates = build_kit(model, plan, self.kit_settings(block_mm), progress=self.progress)
+            res.kit, res.plates = kit, plates
+            res.stats["kit"] = {"pieces": kit.total_pieces, "types": len(kit.pieces), "plates": len(plates), "baseplates": len(kit.baseplates)}
+            if out_path:
+                kit_dir = Path(out_path).parent / (Path(out_path).stem + "_kit")
+                self.progress(0.95, f"Writing kit to {kit_dir}")
+                res.files = write_kit(kit, plates, kit_dir, Path(path).stem, progress=self.progress)
+        elif self.settings.split_to_bed and self.settings.bed_mm:
             res.meshes, res.files = self._export_tiles(model, plan, block_mm, out_path, fmt, Path(path).stem)
         else:
             ms = self.mesh(model, plan, block_mm)

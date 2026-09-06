@@ -60,11 +60,48 @@ Existing converters treat every block as a cube, or need a resource pack and a l
 
 Plus a database of 140+ printers with bed sizes and slot counts, and detection of installed slicers (Bambu Studio, OrcaSlicer, PrusaSlicer, Cura, Creality Print, Elegoo Slicer, QIDI Slicer) to open the export directly.
 
+**Modes**
+- Style: textured relief, flat smooth faces, or plain cubes
+- Build: one solid model, or a modular kit of studded pieces with print plates, baseplate tiles and a layer-by-layer assembly guide
+
 **Output**
 - 3MF with one part per filament and base materials (any slicer)
 - 3MF project for Bambu Studio / OrcaSlicer with filament slots pre-assigned
 - STL per color, merged STL, OBJ + MTL
 - Tiles that fit the bed, each exported separately
+
+## Modes
+
+**Style** (how surfaces look)
+
+| Style | What you get | When to use |
+|---|---|---|
+| Textured | relief carved from the block textures on every exposed face | showcase pieces, 0.4 mm nozzle or finer |
+| Flat | the real block shapes with smooth faces, no relief | any printer, fastest and most robust |
+| Plain cubes | every block becomes a simple cube in its color | classic voxel look, huge builds |
+
+**Build** (what comes out)
+
+| Build | What you get |
+|---|---|
+| Single model | one multi-color object (or STL/OBJ), optionally tiled to the bed |
+| Modular kit | every block as a separate piece with a stud on top and a socket underneath, printed flat on plates and assembled by hand like LEGO |
+
+### Modular kit
+
+![Kit pieces](docs/kit-pieces.png)
+![Kit pieces, underside](docs/kit-pieces-bottom.png)
+
+- One block = one unit (the block size). Studs are square, half a unit wide with a stepped chamfer; sockets have a configurable clearance (0.15 mm per side by default) and an entry chamfer.
+- Runs of identical full-cube blocks merge into bars up to N units long, alternating direction every layer so walls interlock like brickwork.
+- Stairs, slabs, fences, doors, flowers keep their geometry; thin pieces get a socketed base tile.
+- Output folder: `pieces/` (one STL per piece type, quantity in the file name), `plates/` (3MF plates with every copy arranged on your bed, one filament per plate), studded baseplate tiles, `parts.csv`, and `assembly_guide.html` with a colored top-down map for every layer.
+
+```bash
+python -m mcprint convert castle.litematic --kit --block-mm 10 --kit-fit 0.15 --bed 330x320x325
+python -m mcprint convert castle.litematic --style flat            # smooth faces, no relief
+python -m mcprint convert castle.litematic --style cubes           # plain cubes
+```
 
 ## Block catalog
 

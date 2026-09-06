@@ -211,6 +211,21 @@ class MainWindow(QMainWindow):
         s = self.settings
         w = QWidget()
         lay = QVBoxLayout(w)
+        g = QGroupBox("Mode")
+        f = QFormLayout(g)
+        self.style = QComboBox()
+        self.style.addItem("Textured – relief carved from block textures", "textured")
+        self.style.addItem("Flat – smooth faces, no relief (easiest to print)", "flat")
+        self.style.addItem("Plain cubes – every block becomes a simple cube", "cubes")
+        self.style.setCurrentIndex(max(0, self.style.findData(s.style)))
+        f.addRow("Style", self.style)
+        self.build_type = QComboBox()
+        self.build_type.addItem("Single model – print the whole build as one object", "solid")
+        self.build_type.addItem("Modular kit – blocks with studs & sockets, assemble like LEGO", "kit")
+        self.build_type.setCurrentIndex(max(0, self.build_type.findData(s.build_type)))
+        f.addRow("Build", self.build_type)
+        lay.addWidget(g)
+
         g = QGroupBox("Scale")
         f = QFormLayout(g)
         self.block_mm = QDoubleSpinBox()
@@ -285,6 +300,39 @@ class MainWindow(QMainWindow):
         self.relief_mode.setCurrentIndex(max(0, self.relief_mode.findData(s.relief_mode)))
         f.addRow("Depth from", self.relief_mode)
         lay.addWidget(g)
+
+        self.kit_group = QGroupBox("Modular kit (block size above = unit size)")
+        f = QFormLayout(self.kit_group)
+        self.kit_fit = QDoubleSpinBox()
+        self.kit_fit.setRange(0.0, 1.0)
+        self.kit_fit.setSingleStep(0.05)
+        self.kit_fit.setDecimals(2)
+        self.kit_fit.setValue(s.kit_fit_mm)
+        self.kit_fit.setSuffix(" mm")
+        self.kit_fit.setToolTip("Clearance between stud and socket per side. 0.15 mm suits most PLA printers; larger = looser.")
+        f.addRow("Fit tolerance", self.kit_fit)
+        self.kit_max_len = QSpinBox()
+        self.kit_max_len.setRange(1, 16)
+        self.kit_max_len.setValue(s.kit_max_len)
+        self.kit_max_len.setSuffix(" blocks")
+        self.kit_max_len.setToolTip("Identical neighbouring cubes merge into bars up to this length")
+        f.addRow("Longest bar", self.kit_max_len)
+        self.kit_textured = QCheckBox("Keep textures / relief on pieces")
+        self.kit_textured.setChecked(s.kit_textured)
+        f.addRow("", self.kit_textured)
+        self.kit_detailed = QCheckBox("Stairs, fences, flowers keep their shape (else plain cubes)")
+        self.kit_detailed.setChecked(s.kit_detailed)
+        f.addRow("", self.kit_detailed)
+        self.kit_baseplate = QCheckBox("Studded baseplate tiles")
+        self.kit_baseplate.setChecked(s.kit_baseplate)
+        f.addRow("", self.kit_baseplate)
+        self.kit_alternate = QCheckBox("Alternate bar direction per layer (brick bond)")
+        self.kit_alternate.setChecked(s.kit_alternate)
+        f.addRow("", self.kit_alternate)
+        lay.addWidget(self.kit_group)
+        self.style.currentIndexChanged.connect(self._mode_changed)
+        self.build_type.currentIndexChanged.connect(self._mode_changed)
+        self._mode_changed()
 
         g = QGroupBox("Content")
         f = QFormLayout(g)
@@ -650,6 +698,14 @@ class MainWindow(QMainWindow):
         s.alpha_threshold = self.alpha.value()
         s.relief_mm = self.relief.value()
         s.relief_mode = self.relief_mode.currentData() or "auto"
+        s.style = self.style.currentData() or "textured"
+        s.build_type = self.build_type.currentData() or "solid"
+        s.kit_fit_mm = self.kit_fit.value()
+        s.kit_max_len = self.kit_max_len.value()
+        s.kit_textured = self.kit_textured.isChecked()
+        s.kit_detailed = self.kit_detailed.isChecked()
+        s.kit_baseplate = self.kit_baseplate.isChecked()
+        s.kit_alternate = self.kit_alternate.isChecked()
         s.include_fluids = self.fluids.isChecked()
         s.unknown_policy = self.unknown.currentData() or "cube"
         s.remove_islands = self.islands.isChecked()
@@ -678,6 +734,16 @@ class MainWindow(QMainWindow):
 
     def _bed(self) -> tuple[float, float, float]:
         return (self.bed_x.value(), self.bed_y.value(), self.bed_z.value())
+
+    def _mode_changed(self, *_args) -> None:
+        textured = (self.style.currentData() or "textured") == "textured"
+        self.relief.setEnabled(textured)
+        self.relief_mode.setEnabled(textured)
+        kit = (self.build_type.currentData() or "solid") == "kit"
+        self.kit_group.setEnabled(kit)
+        self.kit_textured.setEnabled(kit and textured)
+        if hasattr(self, "export_btn"):
+            self.export_btn.setText("Export kit (pieces, plates, guide)" if kit else "Export")
 
     # ==================================================================================
     # schematic
@@ -1332,10 +1398,16 @@ class MainWindow(QMainWindow):
         split = self.split_tiles.isChecked()
         title = name
 
+        kit_mode = self.settings.build_type == "kit"
+
         def task(progress, cancel):
             conv._progress, conv._cancel = progress, cancel
             out_dir.mkdir(parents=True, exist_ok=True)
             out = out_dir / name
+            if kit_mode:
+                from ..kit import build_kit, write_kit
+                kit, plates = build_kit(model, plan, conv.kit_settings(block_mm), progress=progress)
+                return write_kit(kit, plates, out_dir / f"{name}_kit", title, progress=progress)
             if split:
                 _combined, files = conv._export_tiles(model, plan, block_mm, out, fmt, title)
                 return files
