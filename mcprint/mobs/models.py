@@ -91,8 +91,8 @@ def humanoid(mob_id: str, texture: str, *, layered: bool = True, slim: bool = Fa
     aw = 3.0 if slim else arm_w
     arm_y = 2.5 if slim else 2.0
     if arm_pose == "zombie":
-        arm_rot = (-PI / 2.2, -0.1, 0.0)
-        arm_rot_l = (-PI / 2.2, 0.1, 0.0)
+        arm_rot = (-PI / 2.25, -0.1, 0.0)      # AnimationUtils.animateZombieArms, not aggressive
+        arm_rot_l = (-PI / 2.25, 0.1, 0.0)
     else:
         arm_rot = arm_rot_l = (0.0, 0.0, 0.0)
     head = _box(-4, -8, -4, 8, 8, 8, 0, 0, overlay_uv=(32, 0) if layered else None)
@@ -153,7 +153,7 @@ def villager() -> MobModel:
         _part("nose", [_box(-1, -1, -6, 2, 4, 2, 24, 0)], (0, -2, 0), parent="head"),
         _part("body", [_box(-4, 0, -3, 8, 12, 6, 16, 20), _box(-4, 0, -3, 8, 18, 6, 0, 38, inflate=0.5)]),
         _part("arms", [_box(-8, -2, -2, 4, 8, 4, 44, 22), _box(4, -2, -2, 4, 8, 4, 44, 22, mirror=True),
-                       _box(-4, 2, -2, 8, 4, 4, 40, 38)], (0, 2, 0), (-0.75, 0, 0)),
+                       _box(-4, 2, -2, 8, 4, 4, 40, 38)], (0, 3, -1), (-0.75, 0, 0)),
         _part("right_leg", [_box(-2, 0, -2, 4, 12, 4, 0, 22)], (-2, 12, 0)),
         _part("left_leg", [_box(-2, 0, -2, 4, 12, 4, 0, 22, mirror=True)], (2, 12, 0)),
     ]
@@ -179,7 +179,9 @@ def snow_golem() -> MobModel:
         "up": ("minecraft:block/pumpkin_top", None), "down": ("minecraft:block/pumpkin_top", None),
     }
     parts = [
-        _part("head", [_box(-4, -8, -4, 8, 8, 8, 0, 0, inflate=-0.5), _box(-4, -8, -4, 8, 8, 8, 0, 0, face_textures=pumpkin)], (0, 4, 0)),
+        _part("head", [_box(-4, -8, -4, 8, 8, 8, 0, 0, inflate=-0.5)], (0, 4, 0)),
+        # SnowGolemHeadLayer: carved pumpkin block scaled 0.625 (10 units), centred 5.5 units above the head pivot
+        _part("pumpkin", [_box(-5, -5, -5, 10, 10, 10, 0, 0, face_textures=pumpkin)], (0, -1.5, 0)),
         _part("upper_body", [_box(-5, -10, -5, 10, 10, 10, 0, 16, inflate=-0.5)], (0, 13, 0)),
         _part("lower_body", [_box(-6, -12, -6, 12, 12, 12, 0, 36, inflate=-0.5)], (0, 24, 0)),
         # setupAnim moves the arm pivots to the sides of the middle snowball (x = +-5) and tilts the sticks down and out
@@ -202,16 +204,16 @@ def _quadruped(mob_id, texture, head_boxes, head_off, body_boxes, body_off, leg_
     return MobModel(mob_id, texture, parts, scale=scale, tex_size=tex_size, label=label or mob_id.replace("_", " "), width=width, height=height)
 
 
-_RED_MUSHROOM = {"north": ("minecraft:block/red_mushroom", None), "south": ("minecraft:block/red_mushroom", None)}
+_MUSHROOM_TEX = "minecraft:block/red_mushroom"
+_CAP_RECT = (5, 4, 11, 8)       # red cap with white spots in red_mushroom.png
+_STEM_RECT = (7, 10, 9, 14)     # stem
 
 
-def _mushroom(name: str, offset, yaw_deg: float, parent: Optional[str] = None) -> list:
-    """A red mushroom block (two crossed cut-out planes, 16 units tall) centred at ``offset`` in model space."""
-    out = []
-    for suffix, extra in (("a", 45.0), ("b", -45.0)):
-        out.append(_part(name + suffix, [_box(-8, -8, -0.5, 16, 16, 1, 0, 0, face_textures=_RED_MUSHROOM)], offset,
-                         (0, math.radians(yaw_deg + extra), 0), parent))
-    return out
+def _mushroom(name: str, base, parent: Optional[str] = None) -> list:
+    """A red mushroom standing on ``base`` (model space, y down): 2x5x2 stem under a 6x4x6 cap."""
+    cap = {f: (_MUSHROOM_TEX, _CAP_RECT) for f in ("top", "bottom", "north", "south", "west", "east")}
+    stem = {f: (_MUSHROOM_TEX, _STEM_RECT) for f in ("top", "bottom", "north", "south", "west", "east")}
+    return [_part(name, [_box(-1, -5, -1, 2, 5, 2, 0, 0, face_textures=stem), _box(-3, -9, -3, 6, 4, 6, 0, 0, face_textures=cap)], base, (0, 0, 0), parent)]
 
 
 def pig(texture: str = "minecraft:entity/pig/temperate_pig") -> MobModel:
@@ -226,9 +228,9 @@ def cow(texture: str = "minecraft:entity/cow/temperate_cow", mob_id: str = "cow"
     extra = []
     if mob_id == "mooshroom":
         # MushroomCowMushroomLayer: two mushrooms on the back, one on the head (block-space offsets -> units)
-        extra += _mushroom("back_mushroom_1", (3.2, -5.6, 8.0), -48.0)
-        extra += _mushroom("back_mushroom_2", (-2.1, -5.6, -0.2), -6.0)
-        extra += _mushroom("head_mushroom", (0.0, -11.2, -3.2), -78.0, parent="head")
+        extra += _mushroom("back_mushroom_1", (3.2, 2.0, 7.0))      # body top is at model y 2
+        extra += _mushroom("back_mushroom_2", (-2.5, 2.0, -1.0))
+        extra += _mushroom("head_mushroom", (0.0, -4.0, -3.0), parent="head")
     return _quadruped(mob_id, texture,
                       [_box(-4, -4, -6, 8, 8, 6, 0, 0), _box(-5, -5, -4, 1, 3, 1, 22, 0), _box(4, -5, -4, 1, 3, 1, 22, 0)], (0, 4, -8),
                       [_box(-6, -10, -7, 12, 18, 10, 18, 4), _box(-2, 2, -8, 4, 6, 1, 52, 0)], (0, 5, 2),
