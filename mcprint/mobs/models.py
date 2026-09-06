@@ -62,6 +62,7 @@ class MobModel:
     texture: str
     parts: list[MobPart]
     scale: float = 1.0                          # renderer scale (ghast 4.5, wither skeleton 1.2...)
+    tex_size: tuple[int, int] = (64, 32)        # texture size the model was authored for (HD packs scale up)
     label: str = ""
     width: float = 1.0                          # hitbox width in blocks (informational)
     height: float = 1.0
@@ -120,7 +121,8 @@ def humanoid(mob_id: str, texture: str, *, layered: bool = True, slim: bool = Fa
         _part("right_leg", [r_leg], (-leg_x, 12, 0)),
         _part("left_leg", [l_leg], (leg_x, 12, 0)),
     ]
-    return MobModel(mob_id, texture, parts, scale=scale, label=label or mob_id.replace("_", " "), width=0.6, height=1.95 * scale)
+    return MobModel(mob_id, texture, parts, scale=scale, tex_size=(64, 64) if layered else (64, 32),
+                    label=label or mob_id.replace("_", " "), width=0.6, height=1.95 * scale)
 
 
 def creeper() -> MobModel:
@@ -155,7 +157,7 @@ def villager() -> MobModel:
         _part("right_leg", [_box(-2, 0, -2, 4, 12, 4, 0, 22)], (-2, 12, 0)),
         _part("left_leg", [_box(-2, 0, -2, 4, 12, 4, 0, 22, mirror=True)], (2, 12, 0)),
     ]
-    return MobModel("villager", "minecraft:entity/villager/villager", parts, label="villager", width=0.6, height=1.95)
+    return MobModel("villager", "minecraft:entity/villager/villager", parts, tex_size=(64, 64), label="villager", width=0.6, height=1.95)
 
 
 def iron_golem() -> MobModel:
@@ -167,7 +169,7 @@ def iron_golem() -> MobModel:
         _part("right_leg", [_box(-3.5, -3, -3, 6, 16, 5, 37, 0)], (-4, 11, 0)),
         _part("left_leg", [_box(-3.5, -3, -3, 6, 16, 5, 60, 0, mirror=True)], (5, 11, 0)),
     ]
-    return MobModel("iron_golem", "minecraft:entity/iron_golem/iron_golem", parts, label="iron golem", width=1.4, height=2.7)
+    return MobModel("iron_golem", "minecraft:entity/iron_golem/iron_golem", parts, tex_size=(128, 128), label="iron golem", width=1.4, height=2.7)
 
 
 def snow_golem() -> MobModel:
@@ -177,25 +179,39 @@ def snow_golem() -> MobModel:
         "up": ("minecraft:block/pumpkin_top", None), "down": ("minecraft:block/pumpkin_top", None),
     }
     parts = [
-        _part("head", [_box(-4, -16, -4, 8, 8, 8, 0, 0, inflate=-0.5), _box(-4, -16, -4, 8, 8, 8, 0, 0, face_textures=pumpkin)], (0, 4, 0)),
+        _part("head", [_box(-4, -8, -4, 8, 8, 8, 0, 0, inflate=-0.5), _box(-4, -8, -4, 8, 8, 8, 0, 0, face_textures=pumpkin)], (0, 4, 0)),
         _part("upper_body", [_box(-5, -10, -5, 10, 10, 10, 0, 16, inflate=-0.5)], (0, 13, 0)),
         _part("lower_body", [_box(-6, -12, -6, 12, 12, 12, 0, 36, inflate=-0.5)], (0, 24, 0)),
-        _part("right_arm", [_box(-1, 0, -1, 12, 2, 2, 32, 0, inflate=-0.5)], (0, 6, 0), (0, 0, 1)),
-        _part("left_arm", [_box(-1, 0, -1, 12, 2, 2, 32, 0, inflate=-0.5)], (0, 6, 0), (0, PI, -1)),
+        # setupAnim moves the arm pivots to the sides of the middle snowball (x = +-5) and tilts the sticks down and out
+        _part("right_arm", [_box(-1, 0, -1, 12, 2, 2, 32, 0, inflate=-0.5)], (5, 6, 0), (0, 0, 1)),
+        _part("left_arm", [_box(-1, 0, -1, 12, 2, 2, 32, 0, inflate=-0.5)], (-5, 6, 0), (0, PI, -1)),
     ]
-    return MobModel("snow_golem", "minecraft:entity/snow_golem", parts, label="snow golem", width=0.7, height=1.9)
+    return MobModel("snow_golem", "minecraft:entity/snow_golem", parts, tex_size=(64, 64), label="snow golem", width=0.7, height=1.9)
 
 
 # ======================================================================================
 # quadrupeds
 # ======================================================================================
-def _quadruped(mob_id, texture, head_boxes, head_off, body_boxes, body_off, leg_box, leg_offs, extra=(), label="", width=0.9, height=0.9, scale=1.0):
+def _quadruped(mob_id, texture, head_boxes, head_off, body_boxes, body_off, leg_box, leg_offs, extra=(), label="", width=0.9, height=0.9, scale=1.0,
+               tex_size=(64, 32)):
     parts = [_part("head", head_boxes, head_off), _part("body", body_boxes, body_off, (HALF_PI, 0, 0))]
     names = ["right_hind_leg", "left_hind_leg", "right_front_leg", "left_front_leg"]
     for n, off in zip(names, leg_offs):
         parts.append(_part(n, [replace(leg_box)], off))
     parts.extend(extra)
-    return MobModel(mob_id, texture, parts, scale=scale, label=label or mob_id.replace("_", " "), width=width, height=height)
+    return MobModel(mob_id, texture, parts, scale=scale, tex_size=tex_size, label=label or mob_id.replace("_", " "), width=width, height=height)
+
+
+_RED_MUSHROOM = {"north": ("minecraft:block/red_mushroom", None), "south": ("minecraft:block/red_mushroom", None)}
+
+
+def _mushroom(name: str, offset, yaw_deg: float, parent: Optional[str] = None) -> list:
+    """A red mushroom block (two crossed cut-out planes, 16 units tall) centred at ``offset`` in model space."""
+    out = []
+    for suffix, extra in (("a", 45.0), ("b", -45.0)):
+        out.append(_part(name + suffix, [_box(-8, -8, -0.5, 16, 16, 1, 0, 0, face_textures=_RED_MUSHROOM)], offset,
+                         (0, math.radians(yaw_deg + extra), 0), parent))
+    return out
 
 
 def pig(texture: str = "minecraft:entity/pig/temperate_pig") -> MobModel:
@@ -203,21 +219,27 @@ def pig(texture: str = "minecraft:entity/pig/temperate_pig") -> MobModel:
                       [_box(-4, -4, -8, 8, 8, 8, 0, 0), _box(-2, 0, -9, 4, 3, 1, 16, 16)], (0, 12, -6),
                       [_box(-5, -10, -7, 10, 16, 8, 28, 8)], (0, 11, 2),
                       _box(-2, 0, -2, 4, 6, 4, 0, 16), [(-3, 18, 7), (3, 18, 7), (-3, 18, -5), (3, 18, -5)],
-                      label="pig", width=0.9, height=0.9)
+                      label="pig", width=0.9, height=0.9, tex_size=(64, 64))
 
 
 def cow(texture: str = "minecraft:entity/cow/temperate_cow", mob_id: str = "cow") -> MobModel:
+    extra = []
+    if mob_id == "mooshroom":
+        # MushroomCowMushroomLayer: two mushrooms on the back, one on the head (block-space offsets -> units)
+        extra += _mushroom("back_mushroom_1", (3.2, -5.6, 8.0), -48.0)
+        extra += _mushroom("back_mushroom_2", (-2.1, -5.6, -0.2), -6.0)
+        extra += _mushroom("head_mushroom", (0.0, -11.2, -3.2), -78.0, parent="head")
     return _quadruped(mob_id, texture,
                       [_box(-4, -4, -6, 8, 8, 6, 0, 0), _box(-5, -5, -4, 1, 3, 1, 22, 0), _box(4, -5, -4, 1, 3, 1, 22, 0)], (0, 4, -8),
                       [_box(-6, -10, -7, 12, 18, 10, 18, 4), _box(-2, 2, -8, 4, 6, 1, 52, 0)], (0, 5, 2),
                       _box(-2, 0, -2, 4, 12, 4, 0, 16), [(-4, 12, 7), (4, 12, 7), (-4, 12, -6), (4, 12, -6)],
-                      label=mob_id, width=0.9, height=1.4)
+                      extra=extra, label=mob_id, width=0.9, height=1.4, tex_size=(64, 64))
 
 
 def sheep(color: str = "white", sheared: bool = False) -> MobModel:
     wool = "minecraft:entity/sheep/sheep_wool"
     tint = DYE_RGB.get(color, DYE_RGB["white"])
-    head = [_box(-3, -4, -4, 6, 6, 8, 0, 0)]
+    head = [_box(-3, -4, -6, 6, 6, 8, 0, 0)]
     body = [_box(-4, -10, -7, 8, 16, 6, 28, 8)]
     leg = _box(-2, 0, -2, 4, 12, 4, 0, 16)
     if not sheared:
@@ -270,7 +292,7 @@ def cat(texture: str = "minecraft:entity/cat/tabby", mob_id: str = "cat") -> Mob
         _part("left_front_leg", [_box(-1, 0, 0, 2, 10, 2, 40, 0)], (1.2, 14.1, -5)),
         _part("right_front_leg", [_box(-1, 0, 0, 2, 10, 2, 40, 0)], (-1.2, 14.1, -5)),
         _part("tail1", [_box(-0.5, 0, 0, 1, 8, 1, 0, 15)], (0.5, 15, 8), (0.9, 0, 0)),
-        _part("tail2", [_box(-0.5, 0, 0, 1, 8, 1, 4, 15)], (0.5, 20, 14)),
+        _part("tail2", [_box(-0.5, 0, 0, 1, 8, 1, 4, 15)], (0.5, 20, 14), (1.7278761, 0, 0)),
     ]
     return MobModel(mob_id, texture, parts, label=mob_id, width=0.6, height=0.7)
 
@@ -293,7 +315,7 @@ def spider(texture: str = "minecraft:entity/spider/spider", mob_id: str = "spide
     ]
     for name, side, z, k, yrot in legs:
         box = _box(-15, -1, -1, 16, 2, 2, 18, 0) if side < 0 else _box(-1, -1, -1, 16, 2, 2, 18, 0, mirror=True)
-        parts.append(_part(name, [box], (4 * side, 15, z), (0, yrot, -f * k * side)))
+        parts.append(_part(name, [box], (4 * side, 15, z), (0, yrot, f * k * side)))
     return MobModel(mob_id, texture, parts, scale=scale, label=mob_id.replace("_", " "), width=1.4 * scale, height=0.9 * scale)
 
 
@@ -319,13 +341,15 @@ def ghast() -> MobModel:
 
 def bee() -> MobModel:
     parts = [
-        _part("bone", [_box(-3.5, -4, -5, 7, 7, 10, 0, 0), _box(0, -1, 5, 0, 1, 2, 26, 7),
-                       _box(-5, 0, 0, 7, 2, 0, 26, 1), _box(-5, 0, 2, 7, 2, 0, 26, 3), _box(-5, 0, 4, 7, 2, 0, 26, 5)], (0, 19, 0)),
+        _part("bone", [_box(-3.5, -4, -5, 7, 7, 10, 0, 0), _box(0, -1, 5, 0, 1, 2, 26, 7)], (0, 19, 0)),
+        _part("front_legs", [_box(-5, 0, 0, 7, 2, 0, 26, 1)], (1.5, 3, -2), parent="bone"),
+        _part("middle_legs", [_box(-5, 0, 0, 7, 2, 0, 26, 3)], (1.5, 3, 0), parent="bone"),
+        _part("back_legs", [_box(-5, 0, 0, 7, 2, 0, 26, 5)], (1.5, 3, 2), parent="bone"),
         _part("antennae", [_box(1.5, -2, -3, 1, 2, 3, 2, 0), _box(-2.5, -2, -3, 1, 2, 3, 2, 3)], (0, -2, -5), parent="bone"),
         _part("right_wing", [_box(-9, 0, 0, 9, 0, 6, 0, 18)], (-1.5, -4, -3), (0, -0.2618, 0), parent="bone"),
         _part("left_wing", [_box(0, 0, 0, 9, 0, 6, 0, 18, mirror=True)], (1.5, -4, -3), (0, 0.2618, 0), parent="bone"),
     ]
-    return MobModel("bee", "minecraft:entity/bee/bee", parts, label="bee", width=0.7, height=0.6)
+    return MobModel("bee", "minecraft:entity/bee/bee", parts, tex_size=(64, 64), label="bee", width=0.7, height=0.6)
 
 
 # ======================================================================================

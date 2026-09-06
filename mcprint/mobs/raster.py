@@ -128,9 +128,10 @@ def _face_fractions(face: str, p: np.ndarray, lo0: np.ndarray, hi0: np.ndarray) 
     return np.clip(fu, 0.0, 0.999999), np.clip(fv, 0.0, 0.999999)
 
 
-def _sample(tex: np.ndarray, rect: tuple[float, float, float, float], fu: np.ndarray, fv: np.ndarray) -> np.ndarray:
+def _sample(tex: np.ndarray, rect: tuple[float, float, float, float], fu: np.ndarray, fv: np.ndarray, scale: float = 1.0) -> np.ndarray:
+    """Texels under ``rect`` (in the model's declared texture pixels; ``scale`` = actual / declared width for HD textures)."""
     H, W = tex.shape[:2]
-    u0, v0, rw, rh = rect
+    u0, v0, rw, rh = (v * scale for v in rect)
     px = np.clip(np.floor(u0 + fu * rw).astype(np.int64), 0, W - 1)
     py = np.clip(np.floor(v0 + fv * rh).astype(np.int64), 0, H - 1)
     return tex[py, px]
@@ -246,11 +247,12 @@ class MobVoxelizer:
                 if tex is None:
                     rgb[sel] = (150, 150, 150)
                     continue
-                px = _sample(tex, rects[face], fu, fv)
+                px = _sample(tex, rects[face], fu, fv, tex.shape[1] / model.tex_size[0])
                 col = px[:, :3].astype(np.uint8)
-                ok = px[:, 3] >= self.alpha
+                # translucent parts (slime) are printed solid in clear filament: their soft alpha is not a cut-out
+                ok = px[:, 3] >= self.alpha if not box.translucent else np.ones(len(fu), dtype=bool)
                 if orects is not None and otex is not None:
-                    op = _sample(otex, orects[face], fu, fv)
+                    op = _sample(otex, orects[face], fu, fv, otex.shape[1] / model.tex_size[0])
                     over = op[:, 3] >= self.alpha
                     col = np.where(over[:, None], op[:, :3], col).astype(np.uint8)
                     ok |= over

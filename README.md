@@ -135,6 +135,7 @@ Mobs are built the way the game builds them: every `ModelPart` box with its `tex
 - **From the schematic.** Entities are read from Sponge v2/v3, Litematica regions, structure files, MCEdit (`WEOrigin` aware) and `.mcstructure`. Position, yaw, sheep `Color`/`Sheared`, slime `Size` and `variant` tags are used; unsupported entity types (item frames, minecarts, mobs without a model yet) are listed as warnings.
 - **Placed by hand.** `--mob ID@X,Y,Z[,YAW]` in block coordinates (feet centre, relative to the schematic), repeatable; `sheep:red@…`, `slime:3@…`, `pig:cold@…`, `wolf:snowy@…`, `cat:siamese@…` pick variants; `--skin steve.png` uses your own 64×64 skin for `player` / `player_slim`; `--mob-scale 2` makes every mob twice the size; `--no-mobs` ignores schematic entities. The app has the same controls on the Schematic tab.
 - **Kit mode.** A mob is one piece: all of its cells as a single body on a base tile with a socket under every ground cell (no studs on a head). Figures print in their dominant color; use the solid build for full-color mobs.
+- **Detail.** Mobs share the block resolution (16 sub-voxels per block by default), so a 4-unit-wide arm is 4 voxels wide and tilted parts (villager arms, spider legs, wolf tail) come out stair-stepped like any diagonal in a voxel model. Set *resolution* to 32 in the Model tab or pass `--resolution 32` for finer figures at the cost of larger meshes.
 
 ```bash
 python -m mcprint mobs                                                    # list ids, sizes, textures

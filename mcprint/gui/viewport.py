@@ -380,7 +380,10 @@ class MeshViewport(QOpenGLWidget):
                 gl.glEnable(GL_BLEND)
                 gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
                 gl.glDepthMask(False)
+                gl.glEnable(GL_CULL_FACE)       # only the near faces of glass-like parts: the inside stays readable
+                gl.glCullFace(GL_BACK)
                 gl.glDrawArrays(GL_TRIANGLES, self._opaque_count, self._count - self._opaque_count)
+                gl.glDisable(GL_CULL_FACE)
                 gl.glDepthMask(True)
                 gl.glDisable(GL_BLEND)
             if self.wireframe:
