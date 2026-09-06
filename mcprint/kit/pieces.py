@@ -69,7 +69,7 @@ class PieceType:
     block_index: int
     state: BlockState
     length: int                      # units along its axis
-    axis: str                        # 'x' | 'z' (Minecraft axes)
+    axis: str                        # 'x' | 'z' (Minecraft axes) | 'y' (stacked: door halves, tall plants)
     cube: bool                       # full cube body
     material: int                    # print material id (from the color plan)
     rgb: tuple[int, int, int]
@@ -78,14 +78,23 @@ class PieceType:
     base_tile: bool = False
     count: int = 0
     mesh: Optional[MeshSet] = None
+    block_indices: tuple = ()        # one palette index per unit (paired blocks: door lower+upper, bed foot+head)
 
     @property
     def footprint_mm(self) -> tuple[float, float]:
         return (0.0, 0.0)  # filled by build_piece_mesh
 
     @property
+    def units_y(self) -> int:
+        return self.length if self.axis == "y" else 1
+
+    @property
     def label(self) -> str:
         n = self.state.path
+        if self.axis == "y" and self.length > 1:
+            return f"{n} (both halves)"
+        if self.length > 1 and self.block_indices and len(set(self.block_indices)) > 1:
+            return f"{n} {self.length}x1 (paired)"
         return f"{n} {self.length}x1" if self.length > 1 else n
 
 
@@ -95,6 +104,10 @@ class Placement:
     x: int
     y: int
     z: int                           # Minecraft block coords of the run's first cell
+
+    @property
+    def units_y(self) -> int:
+        return self.piece.units_y
 
 
 @dataclass
@@ -158,20 +171,63 @@ def extract_pieces(model: VoxelModel, plan: ColorPlan, settings: KitSettings) ->
     used = np.zeros_like(blocks, dtype=bool)
     counter = [0]
 
-    def piece_for(idx: int, length: int, axis: str) -> PieceType:
+    def piece_for(idx: int, length: int, axis: str, indices: tuple = ()) -> PieceType:
         cube = bool(is_full[idx])
-        axis_key = axis if (length > 1 and (settings.textured or not cube)) else "-"
-        key = (idx, length, axis_key)
+        indices = tuple(indices) if indices else (idx,) * length
+        axis_key = axis if (length > 1 and (settings.textured or not cube or len(set(indices)) > 1)) else "-"
+        key = (indices, axis_key)
         pt = types.get(key)
         if pt is None:
             counter[0] += 1
             mat, rgb = material_of(idx)
-            stud, socket, base = _connector_flags(model.patterns[idx], settings, cube)
+            if axis == "y":
+                # stacked halves: socket/base from the bottom pattern, stud from the top pattern
+                stud_top, _s, _b = _connector_flags(model.patterns[indices[-1]], settings, bool(is_full[indices[-1]]))
+                _s2, socket, base = _connector_flags(model.patterns[indices[0]], settings, cube)
+                stud = stud_top and bool(is_full[indices[-1]])
+            else:
+                stud, socket, base = _connector_flags(model.patterns[idx], settings, cube)
+                if len(set(indices)) > 1:
+                    stud = all(_connector_flags(model.patterns[i], settings, bool(is_full[i]))[0] for i in indices)
+                    base = any(_connector_flags(model.patterns[i], settings, bool(is_full[i]))[2] for i in indices)
             pt = PieceType(id=f"P{counter[0]:03d}", key=key, block_index=idx, state=model.palette[idx], length=length,
-                           axis=axis, cube=cube, material=mat, rgb=rgb, has_stud=stud, has_socket=socket, base_tile=base)
+                           axis=axis, cube=cube, material=mat, rgb=rgb, has_stud=stud, has_socket=socket, base_tile=base,
+                           block_indices=indices)
             types[key] = pt
         pt.count += 1
         return pt
+
+    # --- paired blocks: door/plant halves stacked vertically, bed foot+head side by side --------
+    consumed = np.zeros_like(blocks, dtype=bool)
+    starts: dict[tuple[int, int, int], tuple[int, str, tuple]] = {}   # (y,z,x) -> (length, axis, indices)
+    _FACING = {"north": (0, -1), "south": (0, 1), "west": (-1, 0), "east": (1, 0)}
+    for y in range(Y):
+        for z in range(Z):
+            for x in range(X):
+                idx = int(blocks[y, z, x])
+                if idx == 0 or is_full[idx] or consumed[y, z, x]:
+                    continue
+                st = model.palette[idx]
+                props = st.properties
+                if props.get("half") == "lower" and y + 1 < Y:
+                    up = int(blocks[y + 1, z, x])
+                    if up and model.palette[up].name == st.name and model.palette[up].properties.get("half") == "upper" and not consumed[y + 1, z, x]:
+                        starts[(y, z, x)] = (2, "y", (idx, up))
+                        consumed[y + 1, z, x] = True
+                        consumed[y, z, x] = True
+                        continue
+                if props.get("part") == "foot" and props.get("facing") in _FACING:
+                    dx, dz = _FACING[props["facing"]]
+                    hx, hz = x + dx, z + dz
+                    if 0 <= hx < X and 0 <= hz < Z:
+                        head = int(blocks[y, hz, hx])
+                        if head and model.palette[head].name == st.name and model.palette[head].properties.get("part") == "head" and not consumed[y, hz, hx]:
+                            axis = "x" if dx else "z"
+                            first = (y, z, min(x, hx)) if axis == "x" else (y, min(z, hz), x)
+                            order = (idx, head) if (dx > 0 or dz > 0) else (head, idx)
+                            starts[first] = (2, axis, order)
+                            consumed[y, z, x] = True
+                            consumed[y, hz, hx] = True
 
     for y in range(Y):
         axis = "x" if (y % 2 == 0 or not settings.alternate_layers) else "z"
@@ -180,7 +236,12 @@ def extract_pieces(model: VoxelModel, plan: ColorPlan, settings: KitSettings) ->
                 x = 0
                 while x < X:
                     idx = int(blocks[y, z, x])
-                    if idx == 0 or not nonempty[idx] or (settings.skip_non_cube and not is_full[idx]):
+                    if (y, z, x) in starts:
+                        ln, ax, ind = starts[(y, z, x)]
+                        kit.placements.append(Placement(piece_for(ind[0], ln, ax, ind), x, y, z))
+                        x += ln if ax == "x" else 1
+                        continue
+                    if idx == 0 or not nonempty[idx] or consumed[y, z, x] or (settings.skip_non_cube and not is_full[idx]):
                         x += 1
                         continue
                     length = 1
@@ -194,7 +255,12 @@ def extract_pieces(model: VoxelModel, plan: ColorPlan, settings: KitSettings) ->
                 z = 0
                 while z < Z:
                     idx = int(blocks[y, z, x])
-                    if idx == 0 or not nonempty[idx] or (settings.skip_non_cube and not is_full[idx]):
+                    if (y, z, x) in starts:
+                        ln, ax, ind = starts[(y, z, x)]
+                        kit.placements.append(Placement(piece_for(ind[0], ln, ax, ind), x, y, z))
+                        z += ln if ax == "z" else 1
+                        continue
+                    if idx == 0 or not nonempty[idx] or consumed[y, z, x] or (settings.skip_non_cube and not is_full[idx]):
                         z += 1
                         continue
                     length = 1
@@ -266,6 +332,8 @@ def _cut_socket(bm: BoxModel, cx: float, cy: float, z0: float, s: KitSettings) -
 
 def piece_extent(piece: PieceType, s: KitSettings) -> tuple[float, float]:
     U = s.unit_mm
+    if piece.axis == "y":
+        return (U, U)
     return (piece.length * U, U) if piece.axis == "x" else (U, piece.length * U)
 
 
@@ -274,32 +342,45 @@ def build_piece_mesh(piece: PieceType, model: VoxelModel, s: KitSettings) -> Mes
     w, d = piece_extent(piece, s)
     bm = BoxModel()
     mat = max(1, piece.material)
-    if piece.cube and not s.textured:
+    indices = piece.block_indices or (piece.block_index,) * piece.length
+    top_z = U * (piece.length if piece.axis == "y" else 1)
+    if piece.cube and not s.textured and len(set(indices)) == 1:
         bm.add((0, 0, 0), (w, d, U), mat)
     else:
-        pat = model.patterns[piece.block_index]
-        occ_mc = pat.colors != 0
-        if s.textured and model.relief_steps and pat.relief is not None:
-            steps = int(model.relief_steps)
-            pad = steps + 1
-            colors = np.pad(pat.colors, pad)
-            rel = np.pad(pat.relief, pad)
-            carve_relief(colors, rel, steps)
-            occ_mc = colors[pad:-pad, pad:-pad, pad:-pad] != 0
-        occ_print = occ_mc[:, ::-1, :]            # [Z, Y, X]
-        reps = piece.length
-        tiled = np.concatenate([occ_print] * reps, axis=2) if piece.axis == "x" else np.concatenate([occ_print] * reps, axis=1)
-        n = occ_mc.shape[0]
+        def occ_of(idx: int) -> np.ndarray:
+            pat = model.patterns[idx]
+            occ_mc = pat.colors != 0
+            if s.textured and model.relief_steps and pat.relief is not None:
+                steps = int(model.relief_steps)
+                pad = steps + 1
+                colors = np.pad(pat.colors, pad)
+                rel = np.pad(pat.relief, pad)
+                carve_relief(colors, rel, steps)
+                occ_mc = colors[pad:-pad, pad:-pad, pad:-pad] != 0
+            return occ_mc[:, ::-1, :]              # [Z, Y, X] print axes
+        bodies = [occ_of(i) for i in indices]
+        if piece.axis == "y":
+            tiled = np.concatenate(bodies, axis=0)                       # stacked upwards
+        elif piece.axis == "x":
+            tiled = np.concatenate(bodies, axis=2)                       # unit j at higher X
+        else:
+            tiled = np.concatenate(bodies[::-1], axis=1)                 # unit j at higher Minecraft z = lower print Y
+        n = bodies[0].shape[2]
         bm.add_body(VoxelBody(tiled, None, (0.0, 0.0, 0.0), U / n, mat))
         if piece.base_tile:
             bm.add((0, 0, 0), (w, d, s.base_tile_mm), mat)
-    centres = [((i + 0.5) * U, U / 2) for i in range(piece.length)] if piece.axis == "x" else [(U / 2, (i + 0.5) * U) for i in range(piece.length)]
+    if piece.axis == "y":
+        centres = [(U / 2, U / 2)]
+    elif piece.axis == "x":
+        centres = [((i + 0.5) * U, U / 2) for i in range(piece.length)]
+    else:
+        centres = [(U / 2, (i + 0.5) * U) for i in range(piece.length)]
     if piece.has_socket:
         for cx, cy in centres:
             _cut_socket(bm, cx, cy, 0.0, s)
     if piece.has_stud:
         for cx, cy in centres:
-            _add_stud(bm, cx, cy, U, s, mat)
+            _add_stud(bm, cx, cy, top_z, s, mat)
     info = {mat: {"name": f"{piece.id} {piece.label}", "color": tuple(int(v) for v in piece.rgb)}}
     return bm.mesh(material_info=info, single_material=mat)
 

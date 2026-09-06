@@ -97,9 +97,12 @@ Plus a database of 140+ printers with bed sizes and slot counts, and detection o
 |---|---|
 | ![Kit pieces](docs/kit-pieces.png) | ![Kit pieces, underside](docs/kit-pieces-bottom.png) |
 
+*Workbench, furnace, bookshelf, chest, closed and open trapdoor, torch, ladder, lantern, sign, glass, stairs, slab, fence, gate, pane, anvil, cake, campfire, barrel, stone bricks, bricks, log, grass, poppy, enchanting table, flower pot, brewing stand, door, sunflower, bed, tall grass, and 2×1 bars, each with its stud and socket.*
+
 - One block = one unit (the block size). Studs are square, half a unit wide with a stepped chamfer; sockets have a configurable clearance (0.15 mm per side by default) and an entry chamfer.
 - Runs of identical full-cube blocks merge into bars up to N units long, alternating direction every layer so walls interlock like brickwork.
-- Stairs, slabs, fences, doors, flowers keep their geometry; thin pieces get a socketed base tile.
+- Stairs, slabs, fences, trapdoors, torches, ladders, flowers keep their geometry; thin pieces get a socketed base tile.
+- Two-block objects become one piece: door halves and tall plants stack into a 2-unit-tall piece, a bed's foot and head merge into a 2-unit-long piece. The guide marks the cell above a tall piece so nothing else is placed there.
 - Output folder: `pieces/` (one STL per piece type, quantity in the file name), `plates/` (3MF plates with every copy arranged on your bed, one filament per plate), studded baseplate tiles, `parts.csv`, and `assembly_guide.html` with a colored top-down map for every layer.
 
 ```bash

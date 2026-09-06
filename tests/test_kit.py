@@ -84,6 +84,47 @@ def test_extract_and_connectors():
     assert check_watertight(fm)[0] and fm.signed_volume() > s.base_tile_mm * 100 * 0.5
 
 
+def test_paired_pieces_door_and_bed():
+    """Door halves stack into one 2-unit-tall piece; bed foot+head merge into one 2-long piece."""
+    n = 8
+    ci = ColorIndex()
+    wood = ci.index_of_color((150, 110, 60))
+    red = ci.index_of_color((180, 40, 40))
+    door = np.zeros((n, n, n), dtype=np.uint16); door[:, 6:8, :] = wood          # thin panel on the south side
+    door_up = door.copy()
+    bed = np.zeros((n, n, n), dtype=np.uint16); bed[1:4, :, :] = red; bed[0, :2, :2] = red   # mattress + one leg
+    bed_head = bed.copy()
+    pats = [BlockPattern(np.zeros((n, n, n), dtype=np.uint16), kind="empty"), _pattern(door, idx=wood), _pattern(door_up, idx=wood),
+            _pattern(bed, idx=red), _pattern(bed_head, idx=red)]
+    blocks = np.zeros((2, 3, 3), dtype=np.int32)      # [y, z, x]
+    blocks[0, 0, 0] = 1; blocks[1, 0, 0] = 2           # door lower at y=0, upper at y=1
+    blocks[0, 1, 2] = 3; blocks[0, 2, 2] = 4           # bed foot at z=1 facing south -> head at z=2
+    palette = [AIR,
+               BlockState.parse("minecraft:oak_door[facing=south,half=lower,hinge=left,open=false]"),
+               BlockState.parse("minecraft:oak_door[facing=south,half=upper,hinge=left,open=false]"),
+               BlockState.parse("minecraft:red_bed[facing=south,part=foot]"),
+               BlockState.parse("minecraft:red_bed[facing=south,part=head]")]
+    m = VoxelModel(blocks=blocks, palette=palette, patterns=pats, resolution=n, colors=ci)
+    plan = plan_clusters(m.color_histogram(), ci.palette(), 2)
+    s = KitSettings(unit_mm=10.0, baseplate=False)
+    kit = extract_pieces(m, plan, s)
+    assert kit.total_pieces == 2
+    door_p = next(p for p in kit.pieces if "door" in p.state.path)
+    bed_p = next(p for p in kit.pieces if "bed" in p.state.path)
+    assert door_p.axis == "y" and door_p.length == 2 and door_p.block_indices == (1, 2)
+    assert bed_p.axis == "z" and bed_p.length == 2 and bed_p.block_indices == (3, 4)
+    assert door_p.base_tile and door_p.has_socket and not door_p.has_stud
+    dm = build_piece_mesh(door_p, m, s).meshes[0]
+    assert check_watertight(dm)[0]
+    lo, hi = dm.bounds()
+    assert np.allclose(hi[2], 20.0) and np.allclose(hi[:2], [10, 10])       # two units tall, one footprint
+    bm = build_piece_mesh(bed_p, m, s).meshes[0]
+    assert check_watertight(bm)[0]
+    lo, hi = bm.bounds()
+    assert np.allclose(hi[:2], [10, 20])                                    # one unit along X, two along print Y
+    assert [pl.units_y for pl in kit.placements if pl.piece is door_p] == [2]
+
+
 def test_alternating_layers_and_plates(tmp_path):
     m, plan = _model()
     m.blocks[1, :, :] = 1                              # second layer solid stone too
