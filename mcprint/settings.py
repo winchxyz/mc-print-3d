@@ -52,6 +52,7 @@ class ConversionSettings:
     include_mobs: bool = True                 # print mobs stored in the schematic (entities)
     extra_mobs: list[dict] = field(default_factory=list)   # [{id, x, y, z, yaw, props}] placed by the user
     mob_scale: float = 1.0                    # extra scale for every mob (1 = game size)
+    mob_snap_yaw: bool = True                 # turn mobs to the nearest 90 deg so their boxes align with the voxel grid
     player_skin: str = ""                     # PNG used for 'player' mobs (64x64 skin); empty = Steve
     # ---- colors -----------------------------------------------------------------------
     color_mode: str = "block"                 # 'block' (flat color per block type) | 'texel' (per texture pixel) | 'single'

@@ -271,6 +271,8 @@ class Converter:
                 key = normalize_mob_id(mid)
                 skipped[key] = skipped.get(key, 0) + 1
                 continue
+            if s.mob_snap_yaw:
+                yaw = float(round(yaw / 90.0) * 90 % 360)
             out.append(MobPlacement(model, x, y, z, yaw, scale=float(s.mob_scale or 1.0), name=str(props.get("name", ""))))
         for key, n in sorted(skipped.items()):
             self.warnings.append(f"{n} x {key}: no printable model for this entity type, skipped")

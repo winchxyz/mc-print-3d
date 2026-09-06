@@ -49,6 +49,7 @@ def _add_convert_args(p: argparse.ArgumentParser) -> None:
     g.add_argument("--mob", action="append", default=[], metavar="ID@X,Y,Z[,YAW]",
                    help="place a mob, e.g. creeper@3,1,4 or sheep@2,1,2,90 (block coords, feet centre; repeatable; see 'mcprint mobs')")
     g.add_argument("--mob-scale", type=float, help="scale every mob (1 = game size)")
+    g.add_argument("--mob-free-yaw", action="store_true", help="keep exact entity rotations instead of snapping mobs to 90 degree turns")
     g.add_argument("--skin", help="player skin PNG (64x64) used for 'player' / 'player_slim' mobs")
     g = p.add_argument_group("modular kit")
     g.add_argument("--kit", action="store_true", help="build a modular kit: pieces with studs/sockets, print plates, baseplate and assembly guide")
@@ -115,6 +116,8 @@ def _settings_from_args(a: argparse.Namespace) -> ConversionSettings:
         s.extra_mobs = [_parse_mob_spec(spec) for spec in a.mob]
     if a.mob_scale:
         s.mob_scale = max(0.05, a.mob_scale)
+    if a.mob_free_yaw:
+        s.mob_snap_yaw = False
     if a.skin:
         s.player_skin = a.skin
     if a.kit:
