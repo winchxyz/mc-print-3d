@@ -59,7 +59,8 @@ def write_3mf(path: str | Path, meshes: MeshSet, title: str = "mc-print-3d model
     for i, m in enumerate(ms):
         info = meshes.materials.get(m.material, {})
         color = info.get("color", m.color)
-        hexcol = "#{:02X}{:02X}{:02X}FF".format(*[int(c) for c in color[:3]])
+        alpha = "99" if info.get("translucent") else "FF"
+        hexcol = "#{:02X}{:02X}{:02X}".format(*[int(c) for c in color[:3]]) + alpha
         mat_lines.append(f'   <base name="{escape(str(info.get("name") or m.name or f"material_{m.material}"))}" displaycolor="{hexcol}"/>')
     objects = []
     comp = []

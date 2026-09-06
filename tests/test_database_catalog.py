@@ -210,7 +210,7 @@ def test_catalog_vendors():
 def test_catalog_materials():
     assert "PLA" in catalog_materials()
     assert "PETG" in catalog_materials()
-    assert catalog_materials("Generic") == ["PLA"]
+    assert "PLA" in catalog_materials("Generic")
     assert catalog_materials("no such vendor") == []
 
 
@@ -237,7 +237,7 @@ def test_catalog_filaments_returns_copies():
 
 
 def test_minecraft_wool_colors_are_exact():
-    wool = {f.name: f.color_hex for f in catalog_filaments("Generic")}
+    wool = {f.name: f.color_hex for f in catalog_filaments("Generic") if f.product == "Minecraft Wool"}
     assert wool["Minecraft White"] == "#F9FFFE"
     assert wool["Minecraft Black"] == "#1D1D21"
     assert wool["Minecraft Light Blue"] == "#3AB3DA"

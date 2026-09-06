@@ -164,7 +164,8 @@ class Converter:
         return VoxelSettings(resolution=n, min_thickness=s.min_thickness_units(block_mm), alpha_threshold=s.alpha_threshold,
                              cutout_dilation=s.cutout_dilation, solid_textures=tuple(s.solid_textures),
                              translucent_as_solid=s.translucent_as_solid, include_fluids=s.include_fluids,
-                             unknown_policy=s.unknown_policy, relief_depth=s.relief_units(block_mm), relief_mode=s.relief_mode)
+                             unknown_policy=s.unknown_policy, relief_depth=s.relief_units(block_mm), relief_mode=s.relief_mode,
+                             translucent_textures=("glass", "ice", "honey_block", "slime_block", "water") if s.separate_glass else ())
 
     def kit_settings(self, block_mm: float):
         from .kit import KitSettings
@@ -215,7 +216,7 @@ class Converter:
         stats["missing_textures"] = sorted(self.textures.missing)
         # ---- block-level operations
         self.progress(0.55, "Cleaning up: islands / cavities / base")
-        full = lambda rgb: vox.full_pattern(rgb)
+        full = lambda rgb, translucent=False: vox.full_pattern(rgb, translucent=translucent)  # noqa: E731
         if self.settings.remove_islands:
             removed = remove_islands(model, self.settings.island_min_blocks, self.settings.keep_ground_only)
             stats["islands_removed_blocks"] = removed
@@ -247,15 +248,16 @@ class Converter:
         flat = s.color_mode == "block"
         hist = model.color_histogram(flat=flat)
         pal = model.colors.palette()
+        translucent = model.colors.translucent_indices() if s.separate_glass else set()
         if s.color_mode == "single":
             return plan_single(hist, pal, rgb=parse_hex(s.single_color_hex))
         if s.color_mode == "full":
-            return plan_full(hist, pal)
+            return plan_full(hist, pal, translucent=translucent)
         fils = filaments if filaments is not None else self.palette().filaments
         k = max_colors or s.max_colors
         if fils and s.auto_assign:
             k = max(k, len(fils)) if s.color_mode == "texel" else max(k, min(len(fils) * 2, 32))
-        plan = plan_clusters(hist, pal, k)
+        plan = plan_clusters(hist, pal, k, translucent=translucent)
         if fils and s.auto_assign:
             assign_filaments(plan, fils, max_slots=max_colors or s.max_colors)
         return plan

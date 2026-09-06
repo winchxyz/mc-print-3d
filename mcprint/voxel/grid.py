@@ -83,6 +83,7 @@ class VoxelModel:
         block become green, its sides dirt-brown); interior voxels take the overall average.
         """
         pal = self.colors.palette().astype(np.float64)
+        trans_flags = self.colors.is_translucent()
         out = []
         for p in self.patterns:
             if p.is_empty or p.avg_rgb is None:
@@ -109,13 +110,15 @@ class VoxelModel:
                     continue
                 vals = col[m]
                 avg = pal[vals].mean(axis=0)
-                idx = self.colors.index_of_color(tuple(int(round(v)) for v in avg))
+                translucent = bool(trans_flags[vals].mean() > 0.5) if len(vals) else False
+                idx = self.colors.index_of_color(tuple(int(round(v)) for v in avg), translucent=translucent)
                 flat[sel] = idx
                 assigned |= sel
                 counts[idx] = counts.get(idx, 0) + int(sel.sum())
             rest = occ & ~assigned
             if rest.any():
-                idx = self.colors.index_of_color(p.avg_rgb)
+                all_t = bool(trans_flags[col[occ]].mean() > 0.5)
+                idx = self.colors.index_of_color(p.avg_rgb, translucent=all_t)
                 flat[rest] = idx
             q = BlockPattern(flat, kind=p.kind, note=p.note, avg_rgb=p.avg_rgb,
                              dominant=max(counts, key=counts.get) if counts else 0, exposed_counts=counts, relief=p.relief)
@@ -366,11 +369,17 @@ def fill_cavities(model: VoxelModel, voxelizer_full_pattern: Callable[[tuple[int
     # replace filler cells with full-cube patterns of the neighbour's dominant color
     filler_index: dict[int, int] = {}
     changed = enclosed & (filled != model.blocks)
+    trans_flags = model.colors.is_translucent()
     for pal_idx in np.unique(filled[changed]).tolist():
         pat = model.patterns[pal_idx]
         rgb = pat.avg_rgb or (128, 128, 128)
         if pal_idx not in filler_index:
-            fp = voxelizer_full_pattern(rgb)
+            vals = pat.colors[pat.colors != 0]
+            is_trans = bool(len(vals) and trans_flags[vals].mean() > 0.5)
+            try:
+                fp = voxelizer_full_pattern(rgb, translucent=is_trans)
+            except TypeError:
+                fp = voxelizer_full_pattern(rgb)
             fp.kind = "filler"
             model.palette.append(BlockState.make("mcprint:filler", {"of": str(pal_idx)}))
             model.patterns.append(fp)

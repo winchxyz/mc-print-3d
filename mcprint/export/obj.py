@@ -25,7 +25,7 @@ def write_obj(path: str | Path, meshes: MeshSet, object_name: str = "mc-print-3d
         mtl.append(f"Kd {r:.4f} {g:.4f} {b:.4f}")
         mtl.append(f"Ka {r * 0.2:.4f} {g * 0.2:.4f} {b * 0.2:.4f}")
         mtl.append("Ks 0.0 0.0 0.0")
-        mtl.append("d 1.0")
+        mtl.append("d 0.6" if info.get("translucent") else "d 1.0")
         mtl.append("illum 1")
         lines.append(f"g {name}")
         lines.append(f"usemtl {name}")

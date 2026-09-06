@@ -36,6 +36,7 @@ class VoxelSettings:
     alpha_threshold: int = 96            # texture alpha below this = empty
     cutout_dilation: int = 1             # grow opaque texture areas by this many texels (thin stems/wires stay printable)
     solid_textures: tuple[str, ...] = ("glass", "tinted_glass", "ice", "frosted_ice", "slime", "honey", "water", "lava", "leaves")
+    translucent_textures: tuple[str, ...] = ("glass", "ice", "honey_block", "slime_block", "water")   # kept as their own 'clear filament' color
     translucent_as_solid: bool = True    # textures with many semi-transparent pixels are treated as opaque (stained glass, ice)
     include_fluids: bool = False
     unknown_policy: str = "cube"         # 'cube' | 'skip'
@@ -83,6 +84,7 @@ class BlockVoxelizer:
         self.colors = colors or ColorIndex()
         self._cache: dict[BlockState, BlockPattern] = {}
         self._opaque_cache: dict[str, bool] = {}
+        self._translucent_cache: dict[str, bool] = {}
         n = settings.resolution
         h = settings.h
         c = (np.arange(n) + 0.5) * h
@@ -113,9 +115,9 @@ class BlockVoxelizer:
         n = self.settings.resolution
         return BlockPattern(np.zeros((n, n, n), dtype=np.uint16), kind="empty")
 
-    def full_pattern(self, rgb: tuple[int, int, int], kind: str = "ok") -> BlockPattern:
+    def full_pattern(self, rgb: tuple[int, int, int], kind: str = "ok", translucent: bool = False) -> BlockPattern:
         n = self.settings.resolution
-        idx = self.colors.index_of_color(rgb)
+        idx = self.colors.index_of_color(rgb, translucent=translucent)
         p = BlockPattern(np.full((n, n, n), idx, dtype=np.uint16), kind=kind)
         self._finish(p)
         return p
@@ -265,7 +267,7 @@ class BlockVoxelizer:
             # voxel really belongs to another element (keep its color)
             ok = keep if keep is not None else np.ones(len(target), dtype=bool)
             if ok.any():
-                out[target[ok]] = self.colors.index_of(rgb[ok])
+                out[target[ok]] = self.colors.index_of(rgb[ok], translucent=self._is_translucent(face.texture))
                 if rel is not None and self.relief_steps:
                     size = hi - lo
                     if size[axis] >= self.settings.relief_min_element:
@@ -319,6 +321,7 @@ class BlockVoxelizer:
         face_i = np.argmin(dist, axis=1)
         colors = np.zeros((len(idx), 3), dtype=np.uint8)
         solid = np.ones(len(idx), dtype=bool)
+        trans = np.zeros(len(idx), dtype=bool)
         carve = np.zeros(len(idx), dtype=np.uint8) if rel is not None else None
         normal_axis = {"down": 1, "up": 1, "north": 2, "south": 2, "west": 0, "east": 0}
         w = max(hi[0] - lo[0], 1e-6)
@@ -368,13 +371,19 @@ class BlockVoxelizer:
                     rgb = apply_tint(rgb, tint)
             colors[sel] = rgb
             solid[sel] = keep
+            trans[sel] = self._is_translucent(face.texture)
             if carve is not None and size[normal_axis[fname]] >= self.settings.relief_min_element:
                 depth = self._sample_relief(face.texture, u, v)
                 if depth is not None:
                     carve[sel] = np.clip(np.round(depth * self.relief_steps), 0, 255).astype(np.uint8)
         keep_idx = idx[solid]
         if len(keep_idx):
-            out[keep_idx] = self.colors.index_of(colors[solid])
+            tk = trans[solid]
+            ck = colors[solid]
+            if (~tk).any():
+                out[keep_idx[~tk]] = self.colors.index_of(ck[~tk])
+            if tk.any():
+                out[keep_idx[tk]] = self.colors.index_of(ck[tk], translucent=True)
             if carve is not None:
                 rel[keep_idx] = carve[solid]
 
@@ -412,6 +421,16 @@ class BlockVoxelizer:
         px = np.clip((u / 16.0 * W).astype(np.int64), 0, W - 1)
         py = np.clip((v / 16.0 * H).astype(np.int64), 0, H - 1)
         return depth_map[py, px]
+
+    def _is_translucent(self, resource: str) -> bool:
+        """Glass-like textures: printed solid but kept as a separate color for clear filament."""
+        v = self._translucent_cache.get(resource)
+        if v is None:
+            name = resource.split("/")[-1].split(":")[-1]
+            v = any(key == name or name.startswith(key + "_") or name.endswith("_" + key) or key in name
+                    for key in self.settings.translucent_textures)
+            self._translucent_cache[resource] = v
+        return v
 
     def _is_forced_opaque(self, resource: str) -> bool:
         v = self._opaque_cache.get(resource)
@@ -545,7 +564,7 @@ class BlockVoxelizer:
         height_units = 14.0 if level == 0 or level >= 8 else 14.0 * (8 - level) / 8.0
         rows = max(1, int(round(height_units / self.settings.h)))
         pat = np.zeros((n, n, n), dtype=np.uint16)
-        pat[:rows] = self.colors.index_of_color(rgb)
+        pat[:rows] = self.colors.index_of_color(rgb, translucent=("water" in path or "bubble" in path))
         return BlockPattern(pat, kind="fluid")
 
     # ---- stats -----------------------------------------------------------------------

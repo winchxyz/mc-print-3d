@@ -259,6 +259,36 @@ CATALOG: list[Filament] = [
     *_line("Generic", "Minecraft Wool", "PLA", _GENERIC_MINECRAFT),
 ]
 
+# Clear / translucent filaments: matched to glass, ice and water blocks (kept as their own color).
+# Color values are the tint seen on a printed part, not the spool label.
+_TRANSLUCENT: list[tuple[str, str, str, str]] = [
+    ("Bambu Lab", "PETG Basic", "PETG", "Transparent", "#EAF2F6"),
+    ("Bambu Lab", "PLA Translucent", "PLA", "Translucent Gray", "#B9BEC4"),
+    ("Bambu Lab", "PLA Translucent", "PLA", "Translucent Teal", "#67C9C0"),
+    ("Bambu Lab", "PLA Translucent", "PLA", "Translucent Blue", "#5C8FE0"),
+    ("Bambu Lab", "PLA Translucent", "PLA", "Translucent Green", "#7CCB6B"),
+    ("Bambu Lab", "PLA Translucent", "PLA", "Translucent Yellow", "#F2DD5A"),
+    ("Bambu Lab", "PLA Translucent", "PLA", "Translucent Orange", "#F2A24B"),
+    ("Bambu Lab", "PLA Translucent", "PLA", "Translucent Red", "#E05B5B"),
+    ("Bambu Lab", "PLA Translucent", "PLA", "Translucent Purple", "#9B6FD1"),
+    ("Bambu Lab", "PLA Translucent", "PLA", "Translucent Pink", "#F0A3C6"),
+    ("Bambu Lab", "PLA Translucent", "PLA", "Translucent Olive", "#9BA85A"),
+    ("Bambu Lab", "PLA Translucent", "PLA", "Translucent Brown", "#A67A52"),
+    ("Polymaker", "PolyLite PETG", "PETG", "Clear", "#EEF3F5"),
+    ("Prusament", "PETG", "PETG", "Clear", "#EDF2F4"),
+    ("eSUN", "PETG", "PETG", "Clear", "#EEF2F4"),
+    ("SUNLU", "PETG", "PETG", "Transparent", "#EFF3F5"),
+    ("Overture", "PETG", "PETG", "Clear", "#EFF3F5"),
+    ("Generic", "Clear", "PETG", "Clear PETG", "#ECF2F5"),
+    ("Generic", "Clear", "PLA", "Natural PLA", "#F0EDE3"),
+    ("Generic", "Clear", "PLA", "Transparent Blue PLA", "#6AA8E8"),
+]
+for _vendor, _product, _material, _name, _hex in _TRANSLUCENT:
+    _fil = _f(_vendor, _product, _material, _name, _hex)
+    _fil.tags.append("translucent")
+    CATALOG.append(_fil)
+del _vendor, _product, _material, _name, _hex, _fil
+
 
 def _copy(f: Filament) -> Filament:
     """Hand out copies so callers can edit a picked filament without touching the catalog."""

@@ -23,6 +23,7 @@ class Cluster:
     weight: int                        # exposed voxel count
     members: np.ndarray                # color indices belonging to this cluster
     material: int = 0                  # assigned material id (0 = unassigned -> skipped!)
+    translucent: bool = False          # glass-like colors: print with clear / translucent filament
 
     @property
     def hex(self) -> str:
@@ -36,6 +37,7 @@ class Material:
     rgb: tuple[int, int, int]
     filament: Optional[Filament] = None
     slot: Optional[int] = None         # 1-based printer slot / extruder
+    translucent: bool = False
 
     @property
     def hex(self) -> str:
@@ -43,7 +45,7 @@ class Material:
 
     def info(self) -> dict:
         return {"name": self.name, "color": tuple(int(c) for c in self.rgb), "slot": self.slot,
-                "filament": self.filament.label if self.filament else ""}
+                "filament": self.filament.label if self.filament else "", "translucent": self.translucent}
 
 
 @dataclass
@@ -132,40 +134,61 @@ def _hist_arrays(hist: dict[int, int], palette_rgb: np.ndarray) -> tuple[np.ndar
     return idx, rgb, w
 
 
-def plan_clusters(hist: dict[int, int], palette_rgb: np.ndarray, k: int, seed: int = 0) -> ColorPlan:
-    """Reduce to ``k`` clusters; each cluster becomes its own material colored by its centre."""
+def plan_clusters(hist: dict[int, int], palette_rgb: np.ndarray, k: int, seed: int = 0,
+                  translucent: Optional[set] = None) -> ColorPlan:
+    """Reduce to ``k`` clusters; each cluster becomes its own material colored by its centre.
+
+    Translucent color indices (glass, ice, water) are kept out of the k-means and form one extra
+    cluster of their own, so they can be printed with clear filament.
+    """
     n_colors = len(palette_rgb)
-    idx, rgb, w = _hist_arrays(hist, palette_rgb)
+    translucent = set(translucent or ())
+    opaque_hist = {i: c for i, c in hist.items() if i not in translucent}
+    trans_hist = {i: c for i, c in hist.items() if i in translucent and i != 0}
+    idx, rgb, w = _hist_arrays(opaque_hist, palette_rgb)
     plan = ColorPlan(mode="clusters", n_colors=n_colors)
-    if len(idx) == 0:
-        plan.rebuild_lut()
-        return plan
-    labels, centers = kmeans_lab(rgb, w, k, seed=seed)
-    order = np.argsort([-w[labels == i].sum() for i in range(len(centers))])
+    k_opaque = max(1, k - (1 if trans_hist else 0)) if len(idx) else 0
     cid = 1
-    for i in order:
-        sel = labels == i
-        if not sel.any():
-            continue
-        c = tuple(int(round(v)) for v in centers[i])
-        cl = Cluster(id=cid, rgb=c, weight=int(w[sel].sum()), members=idx[sel], material=cid)
+    if len(idx):
+        labels, centers = kmeans_lab(rgb, w, k_opaque, seed=seed)
+        order = np.argsort([-w[labels == i].sum() for i in range(len(centers))])
+        for i in order:
+            sel = labels == i
+            if not sel.any():
+                continue
+            c = tuple(int(round(v)) for v in centers[i])
+            cl = Cluster(id=cid, rgb=c, weight=int(w[sel].sum()), members=idx[sel], material=cid)
+            plan.clusters.append(cl)
+            plan.materials[cid] = Material(id=cid, name=f"Color {cid} {to_hex(c)}", rgb=c, slot=cid)
+            cid += 1
+    if trans_hist:
+        tidx, trgb, tw = _hist_arrays(trans_hist, palette_rgb)
+        avg = (trgb * tw[:, None]).sum(0) / max(tw.sum(), 1e-9)
+        c = tuple(int(round(v)) for v in avg)
+        cl = Cluster(id=cid, rgb=c, weight=int(tw.sum()), members=tidx, material=cid, translucent=True)
         plan.clusters.append(cl)
-        plan.materials[cid] = Material(id=cid, name=f"Color {cid} {to_hex(c)}", rgb=c, slot=cid)
-        cid += 1
+        plan.materials[cid] = Material(id=cid, name=f"Glass {to_hex(c)} (clear filament)", rgb=c, slot=cid, translucent=True)
     plan.rebuild_lut()
     return plan
 
 
-def plan_full(hist: dict[int, int], palette_rgb: np.ndarray) -> ColorPlan:
+def is_clear_filament(f: Filament) -> bool:
+    text = " ".join([f.name, f.product, f.material] + list(f.tags)).lower()
+    return any(key in text for key in ("clear", "transparent", "translucent", "natural", "glass"))
+
+
+def plan_full(hist: dict[int, int], palette_rgb: np.ndarray, translucent: Optional[set] = None) -> ColorPlan:
     """Every color index is its own material (full-color preview / export)."""
     n_colors = len(palette_rgb)
+    translucent = set(translucent or ())
     plan = ColorPlan(mode="full", n_colors=n_colors)
     for i in sorted(hist):
         if i == 0:
             continue
         c = tuple(int(v) for v in palette_rgb[i])
-        plan.clusters.append(Cluster(id=i, rgb=c, weight=int(hist[i]), members=np.asarray([i]), material=i))
-        plan.materials[i] = Material(id=i, name=f"color_{i}", rgb=c, slot=None)
+        t = i in translucent
+        plan.clusters.append(Cluster(id=i, rgb=c, weight=int(hist[i]), members=np.asarray([i]), material=i, translucent=t))
+        plan.materials[i] = Material(id=i, name=f"color_{i}", rgb=c, slot=None, translucent=t)
     plan.rebuild_lut()
     return plan
 
@@ -226,9 +249,17 @@ def assign_filaments(plan: ColorPlan, filaments: list[Filament], max_slots: Opti
     plan.mode = "filaments"
     for j, f in enumerate(fils):
         mid = j + 1
-        plan.materials[mid] = Material(id=mid, name=f.label, rgb=f.rgb, filament=f, slot=subset[j] + 1)
+        plan.materials[mid] = Material(id=mid, name=f.label, rgb=f.rgb, filament=f, slot=subset[j] + 1,
+                                       translucent=is_clear_filament(f))
+    clear_ids = [j for j, f in enumerate(fils) if is_clear_filament(f)]
     for c, j in zip(plan.clusters, nearest.tolist()):
-        c.material = j + 1
+        if c.translucent and clear_ids:
+            # glass goes to the nearest *clear* filament when the user has one
+            cpal = np.asarray([fils[i].rgb for i in clear_ids], dtype=np.float64)
+            jj = int(nearest_palette_index(np.asarray([c.rgb], dtype=np.float64), cpal, metric=metric)[0])
+            c.material = clear_ids[jj] + 1
+        else:
+            c.material = j + 1
     plan.rebuild_lut()
     return plan
 
@@ -242,7 +273,8 @@ def set_cluster_material(plan: ColorPlan, cluster_id: int, material_id: int) -> 
 
 def add_material(plan: ColorPlan, filament: Filament, slot: Optional[int] = None) -> Material:
     mid = max(plan.materials, default=0) + 1
-    m = Material(id=mid, name=filament.label, rgb=filament.rgb, filament=filament, slot=slot or mid)
+    m = Material(id=mid, name=filament.label, rgb=filament.rgb, filament=filament, slot=slot or mid,
+                 translucent=is_clear_filament(filament))
     plan.materials[mid] = m
     return m
 

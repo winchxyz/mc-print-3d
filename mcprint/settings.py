@@ -54,6 +54,7 @@ class ConversionSettings:
     filaments: list[dict] = field(default_factory=list)   # PrintPalette (serialised Filament dicts)
     auto_assign: bool = True                  # map clusters to nearest filament automatically
     single_color_hex: str = "#C8C8C8"
+    separate_glass: bool = True               # keep glass/ice/water as their own color for clear filament
     # ---- export -----------------------------------------------------------------------
     export_format: str = "3mf"                # see mcprint.export.EXPORT_FORMATS
     split_to_bed: bool = False

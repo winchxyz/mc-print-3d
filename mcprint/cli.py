@@ -56,6 +56,7 @@ def _add_convert_args(p: argparse.ArgumentParser) -> None:
     g.add_argument("--colors", type=int, help="number of colors / filament slots (default 4)")
     g.add_argument("--filaments", help="comma separated hex colors of loaded filaments, or 'printer:<id>' to sync, or 'slicer' to import presets")
     g.add_argument("--single-color", help="hex color for --color-mode single")
+    g.add_argument("--glass-opaque", action="store_true", help="do not keep glass/ice/water as a separate 'clear filament' color")
     g = p.add_argument_group("assets")
     g.add_argument("--instance", help="Minecraft instance name/label to take assets from (see 'mcprint instances')")
     g.add_argument("--jar", help="vanilla client jar to use instead of an instance")
@@ -120,6 +121,8 @@ def _settings_from_args(a: argparse.Namespace) -> ConversionSettings:
         s.max_colors = a.colors
     if a.single_color:
         s.single_color_hex = a.single_color
+    if a.glass_opaque:
+        s.separate_glass = False
     if a.instance:
         s.instance_name = a.instance
     if a.no_mods:

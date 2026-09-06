@@ -407,6 +407,9 @@ class MainWindow(QMainWindow):
         self.auto_assign = QCheckBox("Auto-assign clusters to the nearest filament")
         self.auto_assign.setChecked(s.auto_assign)
         f.addRow("", self.auto_assign)
+        self.separate_glass = QCheckBox("Keep glass / ice / water as their own color (print with clear filament)")
+        self.separate_glass.setChecked(s.separate_glass)
+        f.addRow("", self.separate_glass)
         lay.addWidget(g)
 
         g = QGroupBox("Loaded filaments (print palette)")
@@ -719,6 +722,7 @@ class MainWindow(QMainWindow):
         s.max_colors = self.max_colors.value()
         s.single_color_hex = self.single_color.color()
         s.auto_assign = self.auto_assign.isChecked()
+        s.separate_glass = self.separate_glass.isChecked()
         s.filaments = [f.to_dict() for f in self.palette]
         s.export_format = self.fmt.currentData() or "3mf"
         s.split_to_bed = self.split_tiles.isChecked()

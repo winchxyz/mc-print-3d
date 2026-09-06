@@ -43,6 +43,7 @@ Existing converters treat every block as a cube, or need a resource pack and a l
 - Floating fragment removal, cavity filling, base plate, cropping, rotation, bed-fit scaling and tiling
 
 **Colors**
+- Glass, stained glass, panes, ice, honey/slime and water are printed solid but kept as their own "clear filament" color: never merged with opaque blocks, matched to a clear/translucent filament when you have one, on their own plate in kit mode, semi-transparent in the preview and in 3MF/OBJ (alpha)
 - Per-block (flat colors per block face) or per-texel coloring, reduced with weighted k-means in CIELAB
 - Filaments you own: printer sync, slicer preset import, a 285-color catalog, or custom entries
 - Best-subset selection for the slots you have and nearest-match assignment (CIEDE2000), editable per model color with a ΔE readout

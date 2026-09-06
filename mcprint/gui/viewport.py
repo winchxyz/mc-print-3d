@@ -34,11 +34,11 @@ VERT = """
 #version 120
 attribute vec3 a_pos;
 attribute vec3 a_nrm;
-attribute vec3 a_col;
+attribute vec4 a_col;
 uniform mat4 u_mvp;
 uniform mat4 u_model;
 varying vec3 v_nrm;
-varying vec3 v_col;
+varying vec4 v_col;
 void main() {
     gl_Position = u_mvp * vec4(a_pos, 1.0);
     v_nrm = mat3(u_model) * a_nrm;
@@ -48,14 +48,14 @@ void main() {
 FRAG = """
 #version 120
 varying vec3 v_nrm;
-varying vec3 v_col;
+varying vec4 v_col;
 uniform vec3 u_light;
 void main() {
     vec3 n = normalize(v_nrm);
     float diff = max(dot(n, normalize(u_light)), 0.0);
     float diff2 = max(dot(n, normalize(vec3(-0.4, -0.6, 0.5))), 0.0) * 0.35;
     float l = 0.38 + 0.62 * diff + diff2;
-    gl_FragColor = vec4(v_col * min(l, 1.15), 1.0);
+    gl_FragColor = vec4(v_col.rgb * min(l, 1.15), v_col.a);
 }
 """
 LINE_VERT = """
@@ -124,8 +124,9 @@ class MeshViewport(QOpenGLWidget):
         self.setMinimumSize(320, 240)
         self.setFocusPolicy(Qt.StrongFocus)
         self._meshes: Optional[MeshSet] = None
-        self._vbo_data: Optional[np.ndarray] = None    # interleaved pos(3) nrm(3) col(3) float32
+        self._vbo_data: Optional[np.ndarray] = None    # interleaved pos(3) nrm(3) col(4) float32
         self._count = 0
+        self._opaque_count = 0
         self._dirty = False
         self._prog: Optional[QOpenGLShaderProgram] = None
         self._line_prog: Optional[QOpenGLShaderProgram] = None
@@ -175,6 +176,7 @@ class MeshViewport(QOpenGLWidget):
             self._dirty = True
             return
         chunks = []
+        trans_chunks = []
         for m in ms.meshes:
             if m.material in self.hidden_materials or len(m.triangles) == 0:
                 continue
@@ -186,18 +188,22 @@ class MeshViewport(QOpenGLWidget):
             ln[ln == 0] = 1
             n = (n / ln[:, None]).astype(np.float32)
             info = ms.materials.get(m.material, {})
-            col = np.asarray(info.get("color", m.color), dtype=np.float32)[:3] / 255.0
+            translucent = bool(info.get("translucent"))
+            col = np.asarray(list(info.get("color", m.color))[:3] + [0.55 * 255 if translucent else 255.0], dtype=np.float32) / 255.0
             tri = np.stack([a, b, c], axis=1)                        # (T,3,3)
             nrm = np.repeat(n[:, None, :], 3, axis=1)                # (T,3,3)
-            cols = np.broadcast_to(col, tri.shape).astype(np.float32)
-            data = np.concatenate([tri, nrm, cols], axis=2).reshape(-1, 9)
-            chunks.append(data)
-        if not chunks:
+            cols = np.broadcast_to(col, (tri.shape[0], 3, 4)).astype(np.float32)
+            data = np.concatenate([tri, nrm, cols], axis=2).reshape(-1, 10)
+            (trans_chunks if translucent else chunks).append(data)
+        if not chunks and not trans_chunks:
             self._vbo_data = None
             self._count = 0
+            self._opaque_count = 0
         else:
-            self._vbo_data = np.ascontiguousarray(np.concatenate(chunks, axis=0), dtype=np.float32)
+            parts = chunks + trans_chunks
+            self._vbo_data = np.ascontiguousarray(np.concatenate(parts, axis=0), dtype=np.float32)
             self._count = len(self._vbo_data)
+            self._opaque_count = int(sum(len(c) for c in chunks))
         self._dirty = True
 
     # ---- camera ----------------------------------------------------------------------
@@ -356,19 +362,27 @@ class MeshViewport(QOpenGLWidget):
             eye = self._eye() - self.target
             p.setUniformValue(u["light"], QVector3D(float(eye[0] * 0.6 + 30), float(eye[1] * 0.6 - 40), float(abs(eye[2]) + 80)))
             self._vbo.bind()
-            stride = 9 * 4
+            stride = 10 * 4
             p.enableAttributeArray(u["a_pos"])
             p.enableAttributeArray(u["a_nrm"])
             p.enableAttributeArray(u["a_col"])
             p.setAttributeBuffer(u["a_pos"], GL_FLOAT, 0, 3, stride)
             p.setAttributeBuffer(u["a_nrm"], GL_FLOAT, 12, 3, stride)
-            p.setAttributeBuffer(u["a_col"], GL_FLOAT, 24, 3, stride)
+            p.setAttributeBuffer(u["a_col"], GL_FLOAT, 24, 4, stride)
             if self.wireframe:
                 try:
                     gl.glPolygonMode(0x0408, 0x1B01)  # GL_FRONT_AND_BACK, GL_LINE
                 except Exception:
                     pass
-            gl.glDrawArrays(GL_TRIANGLES, 0, self._count)
+            if self._opaque_count:
+                gl.glDrawArrays(GL_TRIANGLES, 0, self._opaque_count)
+            if self._count > self._opaque_count:
+                gl.glEnable(GL_BLEND)
+                gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+                gl.glDepthMask(False)
+                gl.glDrawArrays(GL_TRIANGLES, self._opaque_count, self._count - self._opaque_count)
+                gl.glDepthMask(True)
+                gl.glDisable(GL_BLEND)
             if self.wireframe:
                 try:
                     gl.glPolygonMode(0x0408, 0x1B02)  # GL_FILL
