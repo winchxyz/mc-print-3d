@@ -57,6 +57,7 @@ class MobBox:
     overlay_uv: Optional[tuple[float, float]] = None   # second skin layer baked where opaque
     overlay_texture: Optional[str] = None       # e.g. enderman eyes
     face_textures: Optional[dict] = None        # face -> (block texture resource, pixel rect or None): pumpkin heads
+    tex_size: Optional[tuple[int, int]] = None  # texture size this box's layer was authored for (extra layers differ)
 
 
 @dataclass
@@ -152,11 +153,12 @@ def _layer_parts(layer: dict, *, prefix: str = "", texture: Optional[str] = None
         elif name in poses:
             rot = tuple(float(v) for v in poses[name])
         boxes = []
+        tsize = tuple(layer.get("texture_size", (64, 32)))
         for c in cubes:
             infl = c["inflate"]
             boxes.append(MobBox(tuple(c["origin"]), tuple(c["size"]), (c["uv"][0], c["uv"][1]), bool(c["mirror"]),
                                float(max(infl)) if max(infl) >= 0 else float(min(infl)), texture=texture, tint=tint,
-                               translucent=translucent))
+                               translucent=translucent, tex_size=tsize))
         for b in boxes:
             ov = overlays.get(path) or overlays.get(name)
             if ov:
@@ -177,7 +179,7 @@ class MobSpec:
     layer: str
     texture: str
     label: str = ""
-    extra_layers: tuple = ()      # (layer, texture, tint, translucent)
+    extra_layers: tuple = ()      # (layer, texture, tint, translucent[, hidden parts])
     hidden: tuple = ()            # part names / paths hidden in the default state
     poses: dict = field(default_factory=dict)      # part -> (rx, ry, rz) from setupAnim's rest state
     overlays: dict = field(default_factory=dict)   # part -> overlay texture baked on top
@@ -238,7 +240,9 @@ REGISTRY: dict[str, MobSpec] = {
     "endermite": MobSpec("endermite", E + "endermite", "endermite", width=0.4, height=0.3),
     "phantom": MobSpec("phantom", E + "phantom", "phantom", width=0.9, height=0.5),
     "warden": MobSpec("warden", E + "warden/warden", "warden", width=0.9, height=2.9),
-    "breeze": MobSpec("breeze", E + "breeze/breeze", "breeze", width=0.6, height=1.77),
+    # BreezeRenderer draws head + rods from breeze.png and the wind funnel from breeze_wind.png (a separate layer)
+    "breeze": MobSpec("breeze", E + "breeze/breeze", "breeze", hidden=("wind_body", "eyes"),
+                      extra_layers=(("breeze_wind", E + "breeze/breeze_wind", None, True, ("body",)),), width=0.6, height=1.77),   # funnel in clear filament
     "creaking": MobSpec("creaking", E + "creaking/creaking", "creaking", width=0.9, height=2.7),
     "strider": MobSpec("strider", E + "strider/strider", "strider", width=0.9, height=1.7),
     # ---- friendly ---------------------------------------------------------------------
@@ -400,7 +404,9 @@ def mob_model(mob_id: str, props: Optional[dict] = None) -> Optional[MobModel]:
         scale *= float(max(1, int(props.get("size", 1)) + 1))
     model = MobModel(mid, texture, parts, scale=scale, tex_size=tuple(layer["texture_size"]), label=spec.label or mid.replace("_", " "),
                      width=spec.width * scale, height=spec.height, layer=layer_name)
-    for extra_layer, extra_tex, tint, translucent in spec.extra_layers:
+    for extra in spec.extra_layers:
+        extra_layer, extra_tex, tint, translucent = extra[:4]
+        extra_hidden = tuple(extra[4]) if len(extra) > 4 else ()
         if mid == "sheep":
             color = props.get("color", "white")
             if props.get("sheared"):           # 1.21.5+: a thin colored undercoat stays on a sheared sheep
@@ -411,7 +417,7 @@ def mob_model(mob_id: str, props: Optional[dict] = None) -> Optional[MobModel]:
         lay = layers.get(extra_layer)
         if lay is None:
             continue
-        extra_parts = _layer_parts(lay, prefix=extra_layer + ":", texture=extra_tex, tint=tint, translucent=translucent)
+        extra_parts = _layer_parts(lay, prefix=extra_layer + ":", texture=extra_tex, tint=tint, translucent=translucent, hidden=extra_hidden)
         if translucent:
             model.parts[:0] = extra_parts        # stamped first so the opaque core and eyes stay visible inside the shell
         else:

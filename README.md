@@ -9,6 +9,10 @@ Convert Minecraft schematics into multi-color, print-ready 3D models, using the 
 [![GUI: PySide6](https://img.shields.io/badge/GUI-PySide6-41CD52?logo=qt&logoColor=white)](https://doc.qt.io/qtforpython-6/)
 [![Formats](https://img.shields.io/badge/schematics-.schematic%20.schem%20.litematic%20.nbt%20.mcstructure%20.bp-blue)](#supported-input-formats)
 
+![A cottage with its mobs, converted for printing](docs/hero.png)
+
+*A 17 × 11 × 13 block cottage with the creatures saved in its schematic, converted at 10 mm per block: texture relief on the walls and roof, the mobs as figures, every color from the game's own textures.*
+
 ![Texture relief on a wall of blocks](docs/texture-relief.png)
 
 *Bricks, stone bricks, cobblestone, planks, stone, mud bricks, deepslate tiles, log, dirt, sandstone — converted at 16 voxels per block with 0.6 mm texture relief. Mortar lines, seams and bark ridges are real geometry; plain stone and dirt stay flat.*
@@ -122,7 +126,7 @@ python -m mcprint convert castle.litematic --style cubes           # plain cubes
 
 ![Printable mobs](docs/mobs.jpg)
 
-*All 78 printable mobs rasterized at 16 voxels per block from the 1.21.11 entity textures, plus a red sheep, a sheared sheep, a size-3 slime, a siamese cat and a snowy wolf. Hostile: blaze, bogged, breeze, cave spider, creaking, creeper, drowned, elder guardian, enderman, endermite, evoker, ghast, giant, guardian, hoglin, husk, illusioner, magma cube, parched, phantom, piglin, piglin brute, pillager, ravager, shulker, silverfish, skeleton, slime, spider, stray, strider, vex, vindicator, warden, witch, wither skeleton, zoglin, zombie, zombie villager, zombified piglin. Friendly: allay, armadillo, axolotl, bat, bee, camel, cat, chicken, cod, cow, dolphin, fox, frog, glow squid, goat, happy ghast, horse, iron golem, llama, mooshroom, nautilus, ocelot, panda, parrot, pig, players (Steve and Alex, or your own skin), pufferfish, rabbit, salmon, sheep, skeleton horse, sniffer, snow golem, squid, tadpole, turtle, villager, wandering trader, wolf, zombie horse.*
+*All 78 printable mobs rasterized at 32 voxels per block from the 1.21.11 entity textures, plus a red sheep, a sheared sheep, a size-3 slime, a siamese cat and a snowy wolf. Hostile: blaze, bogged, breeze, cave spider, creaking, creeper, drowned, elder guardian, enderman, endermite, evoker, ghast, giant, guardian, hoglin, husk, illusioner, magma cube, parched, phantom, piglin, piglin brute, pillager, ravager, shulker, silverfish, skeleton, slime, spider, stray, strider, vex, vindicator, warden, witch, wither skeleton, zoglin, zombie, zombie villager, zombified piglin. Friendly: allay, armadillo, axolotl, bat, bee, camel, cat, chicken, cod, cow, dolphin, fox, frog, glow squid, goat, happy ghast, horse, iron golem, llama, mooshroom, nautilus, ocelot, panda, parrot, pig, players (Steve and Alex, or your own skin), pufferfish, rabbit, salmon, sheep, skeleton horse, sniffer, snow golem, squid, tadpole, turtle, villager, wandering trader, wolf, zombie horse.*
 
 ![Cottage with mobs](docs/preview-mobs.png)
 
@@ -142,7 +146,7 @@ The geometry is not modelled by hand. Minecraft keeps its entity models in code 
 - **One mob, one file.** `mcprint mob creeper --block-mm 20` writes a creeper figure with its plate; `mcprint mob sheep:red --kit` a red sheep as a kit piece; `mcprint mob player --skin me.png --format stl` you.
 - **Kit mode.** A mob is one piece: all of its cells as a single body on a base tile with a socket under every ground cell (no studs on a head). Figures print in their dominant color; use the solid build for full-color mobs.
 - **Rotation.** Entity yaws are snapped to the nearest 90° by default so a figure's boxes align with the voxel grid; a mob turned 37° would print as stair-steps on every face. `--mob-free-yaw` (or the checkbox in the app) keeps the exact rotation.
-- **Detail.** Mobs share the block resolution (16 sub-voxels per block by default), so a 4-unit-wide arm is 4 voxels wide and tilted parts (villager arms, spider legs, wolf tail) come out stair-stepped like any diagonal in a voxel model. Set *resolution* to 32 in the Model tab or pass `--resolution 32` for finer figures at the cost of larger meshes.
+- **Detail.** `mcprint mob` uses up to 32 voxels per block, which small mobs need: a cat is drawn at 0.8 scale and a rabbit at 0.6, so their ears and noses are under a voxel wide at 16. In a schematic, mobs share the block resolution (16 sub-voxels per block by default), so a 4-unit-wide arm is 4 voxels wide and tilted parts (villager arms, spider legs, wolf tail) come out stair-stepped like any diagonal in a voxel model. Set *resolution* to 32 in the Model tab or pass `--resolution 32` for finer figures at the cost of larger meshes.
 
 ```bash
 python -m mcprint mobs                                                    # list ids, sizes, textures

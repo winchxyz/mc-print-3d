@@ -231,6 +231,11 @@ class MobVoxelizer:
             rgb = np.zeros((len(idx), 3), dtype=np.uint8)
             keep = np.ones(len(idx), dtype=bool)
             tex = self._texture(box.texture) if box.texture else tex_default
+            if box.translucent and tex is not None:
+                # printed solid in clear filament: transparent texels take the nearest painted color, never a hole
+                filled = self.textures.filled(box.texture or model.texture)
+                if filled is not None:
+                    tex = np.concatenate([filled, np.full(filled.shape[:2] + (1,), 255, dtype=np.uint8)], axis=2)
             rects = _face_rects(box, box.uv)
             orects = _face_rects(box, box.overlay_uv) if box.overlay_uv else None
             otex = self._texture(box.overlay_texture) if box.overlay_texture else tex
@@ -253,12 +258,13 @@ class MobVoxelizer:
                 if tex is None:
                     rgb[sel] = (150, 150, 150)
                     continue
-                px = _sample(tex, rects[face], fu, fv, tex.shape[1] / model.tex_size[0])
+                tsz = box.tex_size or model.tex_size
+                px = _sample(tex, rects[face], fu, fv, tex.shape[1] / tsz[0])
                 col = px[:, :3].astype(np.uint8)
                 # translucent parts (slime) are printed solid in clear filament: their soft alpha is not a cut-out
                 ok = px[:, 3] >= self.alpha if not box.translucent else np.ones(len(fu), dtype=bool)
                 if orects is not None and otex is not None:
-                    op = _sample(otex, orects[face], fu, fv, otex.shape[1] / model.tex_size[0])
+                    op = _sample(otex, orects[face], fu, fv, otex.shape[1] / tsz[0])
                     over = op[:, 3] >= self.alpha
                     col = np.where(over[:, None], op[:, :3], col).astype(np.uint8)
                     ok |= over

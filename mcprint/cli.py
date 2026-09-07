@@ -240,6 +240,8 @@ def cmd_mob(a: argparse.Namespace) -> int:
         print(f"error: no printable model for {spec['id']!r} (see 'mcprint mobs')", file=sys.stderr)
         return 2
     s = _settings_from_args(a)
+    if not a.resolution:
+        s.resolution = int(max(16, min(32, round(s.block_mm / max(s.nozzle_mm * 1.2, 0.25)))))   # figures: up to 32 voxels per block
     s.include_mobs = True
     s.extra_mobs = []
     s.remove_islands = False
