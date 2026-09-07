@@ -110,14 +110,33 @@ def vanilla_layers() -> dict:
     return data.get("layers", {})
 
 
+_POSES_PATH = Path(__file__).with_name("vanilla_poses.json")
+
+
+@lru_cache(maxsize=1)
+def vanilla_poses() -> dict:
+    """{layer name: {'parts': {path: {'pos', 'rot', 'visible'}}}} from vanilla_poses.json: what the game's
+    ``setupAnim`` does to the rest layer in the idle state (tools/extract_entity_poses.py)."""
+    try:
+        with open(_POSES_PATH, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
 OVERLAY_PART_NAMES = {"hat", "jacket", "right_sleeve", "left_sleeve", "right_pants", "left_pants", "hat_rim"}
 
 
 def _layer_parts(layer: dict, *, prefix: str = "", texture: Optional[str] = None, tint=None, translucent: bool = False,
-                 hidden: tuple = (), poses: Optional[dict] = None, overlays: Optional[dict] = None) -> list[MobPart]:
-    """Convert one extracted layer into MobParts (hidden parts dropped, overlay layers baked)."""
+                 hidden: tuple = (), poses: Optional[dict] = None, overlays: Optional[dict] = None,
+                 runtime: Optional[dict] = None, shown: tuple = ()) -> list[MobPart]:
+    """Convert one extracted layer into MobParts (hidden parts dropped, overlay layers baked).
+
+    ``runtime`` is the game's idle pose for this layer (vanilla_poses.json): rotations, positions and
+    visibility as ``setupAnim`` leaves them; ``poses`` are hand overrides applied after it."""
     poses = poses or {}
     overlays = overlays or {}
+    runtime = runtime or {}
     by_path: dict[str, MobPart] = {}
     out: list[MobPart] = []
     hidden_paths: set[str] = set()
@@ -125,7 +144,9 @@ def _layer_parts(layer: dict, *, prefix: str = "", texture: Optional[str] = None
         path = p["path"]
         name = path.rsplit("/", 1)[-1]
         parent = p["parent"]
-        if name in hidden or path in hidden or (parent and any(parent == h or parent.startswith(h + "/") for h in hidden_paths)):
+        rt = runtime.get(path)
+        rt_hidden = bool(rt) and not rt.get("visible", True) and name not in shown and path not in shown
+        if name in hidden or path in hidden or rt_hidden or (parent and any(parent == h or parent.startswith(h + "/") for h in hidden_paths)):
             hidden_paths.add(path)
             continue
         cubes = p["cubes"]
@@ -148,6 +169,10 @@ def _layer_parts(layer: dict, *, prefix: str = "", texture: Optional[str] = None
                 by_path[path] = host          # children of the overlay (a villager's hat rim) hang off the host
                 continue
         rot = tuple(p["rotation"])
+        offset = tuple(p["offset"])
+        if rt:
+            rot = tuple(float(v) for v in rt.get("rot", rot))
+            offset = tuple(float(v) for v in rt.get("pos", offset))
         if path in poses:
             rot = tuple(float(v) for v in poses[path])
         elif name in poses:
@@ -165,7 +190,7 @@ def _layer_parts(layer: dict, *, prefix: str = "", texture: Optional[str] = None
                 b.overlay_uv = tuple(b.uv)
                 b.overlay_texture = ov
         parent_name = by_path[parent].name if parent and parent in by_path else None   # baked overlays resolve to their host
-        part = MobPart(prefix + path, boxes, tuple(p["offset"]), rot, parent_name)
+        part = MobPart(prefix + path, boxes, offset, rot, parent_name)
         by_path[path] = part
         out.append(part)
     return out
@@ -181,6 +206,7 @@ class MobSpec:
     label: str = ""
     extra_layers: tuple = ()      # (layer, texture, tint, translucent[, hidden parts])
     hidden: tuple = ()            # part names / paths hidden in the default state
+    shown: tuple = ()             # parts kept even when the evaluated idle pose hides them
     poses: dict = field(default_factory=dict)      # part -> (rx, ry, rz) from setupAnim's rest state
     overlays: dict = field(default_factory=dict)   # part -> overlay texture baked on top
     overlay: Optional[str] = None  # a second skin drawn over the whole model (stray / bogged / drowned outer layers), baked
@@ -190,23 +216,19 @@ class MobSpec:
     slim: bool = False
 
 
-ZOMBIE_ARMS = {"right_arm": (-PI / 2.25, -0.1, 0.0), "left_arm": (-PI / 2.25, 0.1, 0.0)}   # AnimationUtils.animateZombieArms, idle
-BEE_ON_GROUND = {"bone/front_legs": (0.7854, 0.0, 0.0), "bone/middle_legs": (0.7854, 0.0, 0.0), "bone/back_legs": (0.7854, 0.0, 0.0)}   # BeeModel.setupAnim on the ground
-# AxolotlModel.setupLayStillOnGroundAnimation (+ applyMirrorLegRotations): legs splayed flat, gills spread, head tilted
-AXOLOTL_ON_LAND = {"body/head": (0.0, 0.0, -0.2), "body/head/top_gills": (0.5, 0.0, 0.0),
-                   "body/head/left_gills": (0.0, -0.5, 0.0), "body/head/right_gills": (0.0, 0.5, 0.0),
-                   "body/left_hind_leg": (1.1, 1.0, 0.0), "body/right_hind_leg": (1.1, -1.0, 0.0),
-                   "body/left_front_leg": (0.8, 2.3, 0.5), "body/right_front_leg": (0.8, -2.3, -0.5)}
+# Idle poses come from vanilla_poses.json (the game's setupAnim evaluated for an idle render state).
+# Hand overrides remain only where that evaluation cannot see the state: BeeModel angles the legs on the ground.
+BEE_ON_GROUND = {"bone/front_legs": (0.7854, 0.0, 0.0), "bone/middle_legs": (0.7854, 0.0, 0.0), "bone/back_legs": (0.7854, 0.0, 0.0)}
 E = "minecraft:entity/"
 
 REGISTRY: dict[str, MobSpec] = {
     # ---- hostile ----------------------------------------------------------------------
     "creeper": MobSpec("creeper", E + "creeper/creeper", "creeper", width=0.6, height=1.7),
-    "zombie": MobSpec("zombie", E + "zombie/zombie", "zombie", poses=ZOMBIE_ARMS),
-    "husk": MobSpec("husk", E + "zombie/husk", "husk", poses=ZOMBIE_ARMS),
-    "drowned": MobSpec("drowned", E + "zombie/drowned", "drowned", poses=ZOMBIE_ARMS, overlay=E + "zombie/drowned_outer_layer"),
-    "zombie_villager": MobSpec("zombie_villager", E + "zombie_villager/zombie_villager", "zombie villager", poses=ZOMBIE_ARMS),
-    "giant": MobSpec("giant", E + "zombie/zombie", "giant", poses=ZOMBIE_ARMS, width=3.6, height=12.0),
+    "zombie": MobSpec("zombie", E + "zombie/zombie", "zombie"),
+    "husk": MobSpec("husk", E + "zombie/husk", "husk"),
+    "drowned": MobSpec("drowned", E + "zombie/drowned", "drowned", overlay=E + "zombie/drowned_outer_layer"),
+    "zombie_villager": MobSpec("zombie_villager", E + "zombie_villager/zombie_villager", "zombie villager"),
+    "giant": MobSpec("giant", E + "zombie/zombie", "giant", width=3.6, height=12.0),
     "skeleton": MobSpec("skeleton", E + "skeleton/skeleton", "skeleton"),
     "stray": MobSpec("stray", E + "skeleton/stray", "stray", overlay=E + "skeleton/stray_overlay"),
     "bogged": MobSpec("bogged", E + "skeleton/bogged", "bogged", overlay=E + "skeleton/bogged_overlay"),
@@ -259,8 +281,8 @@ REGISTRY: dict[str, MobSpec] = {
     "sheep": MobSpec("sheep", E + "sheep/sheep", "sheep", extra_layers=(("sheep_wool", E + "sheep/sheep_wool", DYE_RGB["white"], False),), width=0.9, height=1.3),
     "chicken": MobSpec("chicken", E + "chicken/temperate_chicken", "chicken", width=0.4, height=0.7),
     "wolf": MobSpec("wolf", E + "wolf/wolf", "wolf", width=0.6, height=0.85),
-    "cat": MobSpec("cat", E + "cat/tabby", "cat", poses={"tail2": (1.7278761, 0.0, 0.0)}, width=0.6, height=0.7),
-    "ocelot": MobSpec("ocelot", E + "cat/ocelot", "ocelot", poses={"tail2": (1.7278761, 0.0, 0.0)}, width=0.6, height=0.7),
+    "cat": MobSpec("cat", E + "cat/tabby", "cat", width=0.6, height=0.7),
+    "ocelot": MobSpec("ocelot", E + "cat/ocelot", "ocelot", width=0.6, height=0.7),
     "horse": MobSpec("horse", E + "horse/horse_brown", "horse", width=1.4, height=1.6),
     "skeleton_horse": MobSpec("skeleton_horse", E + "horse/horse_skeleton", "skeleton horse", width=1.4, height=1.6),
     "zombie_horse": MobSpec("zombie_horse", E + "horse/horse_zombie", "zombie horse", width=1.4, height=1.6),
@@ -275,7 +297,7 @@ REGISTRY: dict[str, MobSpec] = {
     "squid": MobSpec("squid", E + "squid/squid", "squid", width=0.8, height=0.8),
     "glow_squid": MobSpec("glow_squid", E + "squid/glow_squid", "glow squid", width=0.8, height=0.8),
     "bee": MobSpec("bee", E + "bee/bee", "bee", poses=BEE_ON_GROUND, width=0.7, height=0.6),
-    "axolotl": MobSpec("axolotl", E + "axolotl/axolotl_lucy", "axolotl", poses=AXOLOTL_ON_LAND, width=0.75, height=0.42),
+    "axolotl": MobSpec("axolotl", E + "axolotl/axolotl_lucy", "axolotl", width=0.75, height=0.42),
     "frog": MobSpec("frog", E + "frog/temperate_frog", "frog", hidden=("croaking_body", "tongue"), width=0.5, height=0.5),
     "tadpole": MobSpec("tadpole", E + "tadpole/tadpole", "tadpole", width=0.4, height=0.3),
     "camel": MobSpec("camel", E + "camel/camel", "camel", width=1.7, height=2.375),
@@ -392,7 +414,8 @@ def mob_model(mob_id: str, props: Optional[dict] = None) -> Optional[MobModel]:
         texture = _VARIANT_TEXTURES[mid][variant]
     if props.get("texture"):
         texture = str(props["texture"])
-    parts = _layer_parts(layer, hidden=spec.hidden, poses=spec.poses, overlays=spec.overlays)
+    runtime = vanilla_poses().get(mid, vanilla_poses().get(layer_name, {})).get("parts", {})
+    parts = _layer_parts(layer, hidden=spec.hidden, poses=spec.poses, overlays=spec.overlays, runtime=runtime, shown=spec.shown)
     if spec.overlay:
         for part in parts:
             for b in part.boxes:

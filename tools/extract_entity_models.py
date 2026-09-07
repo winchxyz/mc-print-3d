@@ -33,6 +33,8 @@ class Mappings:
         self.obf_to_class: dict[str, str] = {}
         self.methods: dict[tuple[str, str, str], str] = {}     # (obf class, obf name, obf descriptor) -> real name
         self.fields: dict[tuple[str, str], str] = {}           # (obf class, obf field) -> real name
+        self.field_types: dict[tuple[str, str], str] = {}      # (obf class, real field) -> java type name
+        self.superclass: dict[str, str] = {}                   # filled lazily by the interpreter
         self._members: dict[str, list[str]] = {}
         cur = None
         for line in text.splitlines():
@@ -60,6 +62,7 @@ class Mappings:
                 m = re.match(r"^(\S+) (\S+) -> (\S+)$", mem)
                 if m:
                     self.fields[(obf_cls, m.group(3))] = m.group(2)
+                    self.field_types[(obf_cls, m.group(2))] = m.group(1)
 
     _PRIM = {"int": "I", "float": "F", "long": "J", "double": "D", "boolean": "Z", "byte": "B", "char": "C", "short": "S", "void": "V"}
 
@@ -100,6 +103,7 @@ class ClassFile:
     methods: dict[tuple[str, str], Method]
     fields: dict[str, str]
     super_name: str = ""
+    access: int = 0
 
     def const(self, i: int):
         return self.cp[i]
@@ -174,7 +178,7 @@ def parse_class(data: bytes) -> ClassFile:
                 m.max_locals = max_locals
             pos += ln
         methods[(m.name, m.desc)] = m
-    return ClassFile(name, cp, methods, fields, super_name)
+    return ClassFile(name, cp, methods, fields, super_name, access)
 
 
 # ======================================================================================
@@ -352,10 +356,50 @@ class Interpreter:
         return cf
 
     def real_method(self, cls: str, name: str, desc: str) -> str:
-        return self.maps.methods.get((cls.replace("/", "."), name, desc), name)
+        # javac names the receiver's static type, so inherited members resolve up the superclass chain
+        c = cls.replace("/", ".")
+        for _ in range(12):
+            real = self.maps.methods.get((c, name, desc))
+            if real is not None:
+                return real
+            cf = self.load(c)
+            if cf is None or not cf.super_name:
+                break
+            c = cf.super_name.replace("/", ".")
+        return name
 
     def real_field(self, cls: str, name: str) -> str:
-        return self.maps.fields.get((cls.replace("/", "."), name), name)
+        c = cls.replace("/", ".")
+        for _ in range(12):
+            real = self.maps.fields.get((c, name))
+            if real is not None:
+                return real
+            cf = self.load(c)
+            if cf is None or not cf.super_name:
+                break
+            c = cf.super_name.replace("/", ".")
+        return name
+
+    # ---- hooks (overridden by the pose evaluator) ------------------------------------
+    def unknown_number(self, v):
+        raise Unsupported(f"arithmetic on {v!r}")
+
+    def get_static(self, cls: str, fname: str, real: str):
+        return None
+
+    def put_field(self, obj, real: str, value) -> None:
+        if obj is not None and not isinstance(obj, (Unknown, int, float, str, list, Wide)) and hasattr(obj, "__dict__"):
+            try:
+                setattr(obj, real, value)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def new_object(self, cls: str):
+        return Unknown("new " + self.maps.real_class(cls))
+
+    def superclass_of(self, cls: str) -> str:
+        cf = self.load(cls)
+        return cf.super_name if cf is not None else ""
 
     # ---- entry points --------------------------------------------------------------
     def run_static(self, cls: str, name: str, desc: str, args: list) -> Any:
@@ -377,6 +421,32 @@ class Interpreter:
             raise Unsupported("recursion too deep")
         try:
             return self.execute(cf, m, args)
+        finally:
+            self.depth -= 1
+
+    def find_method(self, cls: str, name: str, desc: str):
+        """(ClassFile, Method) for name/desc searching up the superclass chain, or (None, None)."""
+        cf = self.load(cls)
+        hops = 0
+        while cf is not None and hops < 12:
+            m = cf.methods.get((name, desc))
+            if m is not None and m.code:
+                return cf, m
+            if not cf.super_name:
+                break
+            cf = self.load(cf.super_name)
+            hops += 1
+        return None, None
+
+    def run_method(self, cls: str, name: str, desc: str, this, args: list) -> Any:
+        cf, m = self.find_method(cls, name, desc)
+        if m is None:
+            raise Unsupported(f"method {cls}.{name}{desc} missing")
+        self.depth += 1
+        if self.depth > 40:
+            raise Unsupported("recursion too deep")
+        try:
+            return self.execute(cf, m, [this] + list(args))
         finally:
             self.depth -= 1
 
@@ -552,7 +622,7 @@ class Interpreter:
             if isinstance(v, Wide):
                 return v.v
             if v is None or isinstance(v, Unknown):
-                raise Unsupported(f"arithmetic on {v!r}")
+                return self.unknown_number(v)
             return v
 
         while pc < len(code):
@@ -710,15 +780,20 @@ class Interpreter:
             elif op == 0xc8:
                 npc = pc + s32(pc + 1)
             elif op == 0xaa:
-                v = int(num(stack.pop())); p = (pc + 4) & ~3
+                raw = stack.pop(); p = (pc + 4) & ~3
                 default = s32(p); lo = s32(p + 4); hi = s32(p + 8)
-                npc = pc + (s32(p + 12 + 4 * (v - lo)) if lo <= v <= hi else default)
+                if isinstance(raw, Unknown):
+                    npc = pc + default
+                else:
+                    v = int(num(raw))
+                    npc = pc + (s32(p + 12 + 4 * (v - lo)) if lo <= v <= hi else default)
             elif op == 0xab:
-                v = int(num(stack.pop())); p = (pc + 4) & ~3
+                raw = stack.pop(); p = (pc + 4) & ~3
                 default = s32(p); n = s32(p + 4)
                 npc = pc + default
+                v = None if isinstance(raw, Unknown) else int(num(raw))
                 for k in range(n):
-                    if s32(p + 8 + 8 * k) == v:
+                    if v is not None and s32(p + 8 + 8 * k) == v:
                         npc = pc + s32(p + 12 + 8 * k); break
             elif op in (0xc6, 0xc7):
                 v = stack.pop(); off = s16(pc + 1); npc = pc + 3
@@ -740,6 +815,11 @@ class Interpreter:
                 elif api == "CubeDeformation" and real == "NONE":
                     stack.append(Deformation())
                 else:
+                    hooked = self.get_static(cls, fname, real)
+                    if hooked is not None:
+                        stack.append(hooked)
+                        pc = npc
+                        continue
                     key = (cls, fname)
                     if key not in self.statics and cls not in self._clinit_done and self.maps.real_class(cls).startswith("net.minecraft.client.model"):
                         self._clinit_done.add(cls)
@@ -762,7 +842,9 @@ class Interpreter:
                 real = self.real_field(cls, fname)
                 stack.append(getattr(obj, real, Unknown("field " + real)) if not isinstance(obj, Unknown) else Unknown("field"))
             elif op == 0xb5:
-                stack.pop(); stack.pop(); npc = pc + 3
+                value = stack.pop(); obj = stack.pop(); npc = pc + 3
+                cls, fname, fdesc = cf.member_ref(u16(pc + 1))
+                self.put_field(obj, self.real_field(cls, fname), value)
             # ---- invocations
             elif op in (0xb6, 0xb7, 0xb8, 0xb9):
                 cls, mname, mdesc = cf.member_ref(u16(pc + 1)); npc = pc + (5 if op == 0xb9 else 3)
@@ -797,7 +879,7 @@ class Interpreter:
                 elif cls == "java/util/Random":
                     stack.append(Unknown("random"))
                 else:
-                    stack.append(Unknown("new " + self.maps.real_class(cls)))
+                    stack.append(self.new_object(cls))
             elif op == 0xbc:
                 n = int(num(stack.pop())); stack.append([0] * n); npc = pc + 2
             elif op == 0xbd:
