@@ -477,6 +477,9 @@ class Interpreter:
                     b = args[1]
                     pose = args[2] if isinstance(args[2], Pose) else Pose()
                     child = Part(cname, pose, list(b.cubes) if isinstance(b, Builder) else [], {})
+                old = p.children.get(cname)
+                if old is not None and not isinstance(args[1], Part):
+                    child.children.update(old.children)      # PartDefinition.addOrReplaceChild keeps the replaced part's children
                 p.children[cname] = child
                 return child
             if rname == "getChild":

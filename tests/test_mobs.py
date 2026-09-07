@@ -37,7 +37,8 @@ def test_id_normalization_and_props():
     red = mob_model("sheep", {"color": 14})
     assert any(b.tint == (0xB0, 0x2E, 0x26) for p in red.parts for b in p.boxes)
     sheared = mob_model("sheep", {"sheared": True})
-    assert not any(b.texture for p in sheared.parts for b in p.boxes)
+    coats = {b.texture for p in sheared.parts for b in p.boxes if b.texture}
+    assert coats == {"minecraft:entity/sheep/sheep_wool_undercoat"}       # thin undercoat instead of the full wool
     assert mob_model("slime", {"size": 3}).scale == 4.0
     assert mob_model("pig", {"variant": "minecraft:cold"}).texture.endswith("cold_pig")
     assert mob_model("player", {"slim": True}).id == "player_slim"

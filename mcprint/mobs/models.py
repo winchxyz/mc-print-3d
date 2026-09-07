@@ -181,6 +181,7 @@ class MobSpec:
     hidden: tuple = ()            # part names / paths hidden in the default state
     poses: dict = field(default_factory=dict)      # part -> (rx, ry, rz) from setupAnim's rest state
     overlays: dict = field(default_factory=dict)   # part -> overlay texture baked on top
+    overlay: Optional[str] = None  # a second skin drawn over the whole model (stray / bogged / drowned outer layers), baked
     scale: float = 1.0            # renderer scale not present in the layer definition
     width: float = 0.6
     height: float = 1.8
@@ -188,6 +189,12 @@ class MobSpec:
 
 
 ZOMBIE_ARMS = {"right_arm": (-PI / 2.25, -0.1, 0.0), "left_arm": (-PI / 2.25, 0.1, 0.0)}   # AnimationUtils.animateZombieArms, idle
+BEE_ON_GROUND = {"bone/front_legs": (0.7854, 0.0, 0.0), "bone/middle_legs": (0.7854, 0.0, 0.0), "bone/back_legs": (0.7854, 0.0, 0.0)}   # BeeModel.setupAnim on the ground
+# AxolotlModel.setupLayStillOnGroundAnimation (+ applyMirrorLegRotations): legs splayed flat, gills spread, head tilted
+AXOLOTL_ON_LAND = {"body/head": (0.0, 0.0, -0.2), "body/head/top_gills": (0.5, 0.0, 0.0),
+                   "body/head/left_gills": (0.0, -0.5, 0.0), "body/head/right_gills": (0.0, 0.5, 0.0),
+                   "body/left_hind_leg": (1.1, 1.0, 0.0), "body/right_hind_leg": (1.1, -1.0, 0.0),
+                   "body/left_front_leg": (0.8, 2.3, 0.5), "body/right_front_leg": (0.8, -2.3, -0.5)}
 E = "minecraft:entity/"
 
 REGISTRY: dict[str, MobSpec] = {
@@ -195,12 +202,12 @@ REGISTRY: dict[str, MobSpec] = {
     "creeper": MobSpec("creeper", E + "creeper/creeper", "creeper", width=0.6, height=1.7),
     "zombie": MobSpec("zombie", E + "zombie/zombie", "zombie", poses=ZOMBIE_ARMS),
     "husk": MobSpec("husk", E + "zombie/husk", "husk", poses=ZOMBIE_ARMS),
-    "drowned": MobSpec("drowned", E + "zombie/drowned", "drowned", poses=ZOMBIE_ARMS),
+    "drowned": MobSpec("drowned", E + "zombie/drowned", "drowned", poses=ZOMBIE_ARMS, overlay=E + "zombie/drowned_outer_layer"),
     "zombie_villager": MobSpec("zombie_villager", E + "zombie_villager/zombie_villager", "zombie villager", poses=ZOMBIE_ARMS),
     "giant": MobSpec("giant", E + "zombie/zombie", "giant", poses=ZOMBIE_ARMS, width=3.6, height=12.0),
     "skeleton": MobSpec("skeleton", E + "skeleton/skeleton", "skeleton"),
-    "stray": MobSpec("stray", E + "skeleton/stray", "stray"),
-    "bogged": MobSpec("bogged", E + "skeleton/bogged", "bogged"),
+    "stray": MobSpec("stray", E + "skeleton/stray", "stray", overlay=E + "skeleton/stray_overlay"),
+    "bogged": MobSpec("bogged", E + "skeleton/bogged", "bogged", overlay=E + "skeleton/bogged_overlay"),
     "parched": MobSpec("parched", E + "skeleton/parched", "parched"),
     "wither_skeleton": MobSpec("wither_skeleton", E + "skeleton/wither_skeleton", "wither skeleton", width=0.7, height=2.4),
     "spider": MobSpec("spider", E + "spider/spider", "spider", width=1.4, height=0.9),
@@ -212,9 +219,10 @@ REGISTRY: dict[str, MobSpec] = {
     "happy_ghast": MobSpec("happy_ghast", E + "ghast/happy_ghast", "happy ghast", width=4.0, height=4.0),
     "blaze": MobSpec("blaze", E + "blaze", "blaze", height=1.8),
     "witch": MobSpec("witch", E + "witch", "witch", height=1.95),
-    "evoker": MobSpec("evoker", E + "illager/evoker", "evoker", hidden=("right_arm", "left_arm")),
-    "vindicator": MobSpec("vindicator", E + "illager/vindicator", "vindicator", hidden=("right_arm", "left_arm")),
-    "pillager": MobSpec("pillager", E + "illager/pillager", "pillager", hidden=("right_arm", "left_arm")),
+    # IllagerModel hides the hat part in its constructor; only the illusioner renderer turns it on
+    "evoker": MobSpec("evoker", E + "illager/evoker", "evoker", hidden=("right_arm", "left_arm", "hat")),
+    "vindicator": MobSpec("vindicator", E + "illager/vindicator", "vindicator", hidden=("right_arm", "left_arm", "hat")),
+    "pillager": MobSpec("pillager", E + "illager/pillager", "pillager", hidden=("arms", "hat")),   # never crosses its arms (holds a crossbow)
     "illusioner": MobSpec("illusioner", E + "illager/illusioner", "illusioner", hidden=("right_arm", "left_arm")),
     "ravager": MobSpec("ravager", E + "illager/ravager", "ravager", width=1.95, height=2.2),
     "vex": MobSpec("vex", E + "illager/vex", "vex", width=0.4, height=0.8),
@@ -258,12 +266,12 @@ REGISTRY: dict[str, MobSpec] = {
     "goat": MobSpec("goat", E + "goat/goat", "goat", width=0.9, height=1.3),
     "rabbit": MobSpec("rabbit", E + "rabbit/brown", "rabbit", width=0.4, height=0.5),
     "parrot": MobSpec("parrot", E + "parrot/parrot_red_blue", "parrot", width=0.5, height=0.9),
-    "turtle": MobSpec("turtle", E + "turtle/big_sea_turtle", "turtle", width=1.2, height=0.4),
+    "turtle": MobSpec("turtle", E + "turtle/big_sea_turtle", "turtle", hidden=("egg_belly",), width=1.2, height=0.4),
     "dolphin": MobSpec("dolphin", E + "dolphin", "dolphin", width=0.9, height=0.6),
     "squid": MobSpec("squid", E + "squid/squid", "squid", width=0.8, height=0.8),
     "glow_squid": MobSpec("glow_squid", E + "squid/glow_squid", "glow squid", width=0.8, height=0.8),
-    "bee": MobSpec("bee", E + "bee/bee", "bee", width=0.7, height=0.6),
-    "axolotl": MobSpec("axolotl", E + "axolotl/axolotl_lucy", "axolotl", width=0.75, height=0.42),
+    "bee": MobSpec("bee", E + "bee/bee", "bee", poses=BEE_ON_GROUND, width=0.7, height=0.6),
+    "axolotl": MobSpec("axolotl", E + "axolotl/axolotl_lucy", "axolotl", poses=AXOLOTL_ON_LAND, width=0.75, height=0.42),
     "frog": MobSpec("frog", E + "frog/temperate_frog", "frog", hidden=("croaking_body", "tongue"), width=0.5, height=0.5),
     "tadpole": MobSpec("tadpole", E + "tadpole/tadpole", "tadpole", width=0.4, height=0.3),
     "camel": MobSpec("camel", E + "camel/camel", "camel", width=1.7, height=2.375),
@@ -381,6 +389,12 @@ def mob_model(mob_id: str, props: Optional[dict] = None) -> Optional[MobModel]:
     if props.get("texture"):
         texture = str(props["texture"])
     parts = _layer_parts(layer, hidden=spec.hidden, poses=spec.poses, overlays=spec.overlays)
+    if spec.overlay:
+        for part in parts:
+            for b in part.boxes:
+                if b.overlay_uv is None:
+                    b.overlay_uv = tuple(b.uv)
+                    b.overlay_texture = spec.overlay
     scale = float(layer.get("root_scale", 1.0)) * spec.scale
     if mid in ("slime", "magma_cube"):
         scale *= float(max(1, int(props.get("size", 1)) + 1))
@@ -388,9 +402,9 @@ def mob_model(mob_id: str, props: Optional[dict] = None) -> Optional[MobModel]:
                      width=spec.width * scale, height=spec.height, layer=layer_name)
     for extra_layer, extra_tex, tint, translucent in spec.extra_layers:
         if mid == "sheep":
-            if props.get("sheared"):
-                continue
             color = props.get("color", "white")
+            if props.get("sheared"):           # 1.21.5+: a thin colored undercoat stays on a sheared sheep
+                extra_layer, extra_tex = "sheep_wool_undercoat", E + "sheep/sheep_wool_undercoat"
             if isinstance(color, int) or (isinstance(color, str) and color.isdigit()):
                 color = DYE_NAMES[int(color) % 16]
             tint = DYE_RGB.get(str(color), DYE_RGB["white"])
