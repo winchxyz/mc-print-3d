@@ -35,6 +35,7 @@ class MobPlacement:
     yaw: float = 0.0        # degrees, Minecraft convention (0 = facing south / +Z, 90 = west)
     scale: float = 1.0      # extra user scale on top of the model's own render scale
     name: str = ""
+    transform: Optional[tuple] = None   # (A 3x3, b) model units -> units, replaces the entity renderer chain (block entities)
 
     @property
     def label(self) -> str:
@@ -85,6 +86,9 @@ def _box_world_matrix(model: MobModel, part: MobPart, placement: MobPlacement, g
                       ) -> tuple[np.ndarray, np.ndarray]:
     """(A, b): part-local (units) -> world sub-voxel-independent units relative to the entity origin, y up."""
     Rp, tp = _part_transform(model, part)
+    if placement.transform is not None:           # block entity renderer: its own pose chain, no mirror, no grounding
+        A0, b0 = placement.transform
+        return A0 @ Rp, A0 @ tp + np.asarray(b0, dtype=np.float64)
     s = model.scale * placement.scale
     S = np.diag([-s, -s, s])                      # LivingEntityRenderer scale(-1, -1, 1) and the render scale
     Ry = rotation_matrix("y", 180.0 - placement.yaw)
@@ -159,6 +163,8 @@ class MobVoxelizer:
 
     def _ground_shift(self, placement: MobPlacement) -> float:
         """Lift so the lowest printed point sits on y = 0 (feet on the ground)."""
+        if placement.transform is not None:
+            return 0.0
         model = placement.model
         s = model.scale * placement.scale
         S = np.diag([-s, -s, s])

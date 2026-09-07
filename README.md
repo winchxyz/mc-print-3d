@@ -32,7 +32,7 @@ Existing converters treat every block as a cube, or need a resource pack and a l
 - Finds installations automatically: vanilla launcher, CurseForge, Prism / MultiMC / PolyMC, Modrinth App, ATLauncher
 - Loads the vanilla jar, every mod jar of the chosen instance (including nested jar-in-jar libraries) and the enabled resource packs
 - Resolves blockstates → variants / multipart → model parent chains → texture variables, exactly like the game
-- Understands Forge / NeoForge `obj` and `composite` model loaders; chests and beds are rebuilt from their entity atlases (lid, latch, pillow, legs), other block-entity blocks (signs, banners, heads, shulker boxes) get shaped fallbacks
+- Understands Forge / NeoForge `obj` and `composite` model loaders; chests (single and joined double chests), beds, shulker boxes and heads use the game's own ModelPart geometry and entity textures read from the client jar; signs, banners, conduits, decorated pots and bells get textured stand-in shapes, and the nether portal prints as a translucent slab.
 - Mobs: creatures stored in the schematic are printed as figures from the game's own entity models (read out of the client jar) and skins; place more yourself, or print a single mob as a figure on a plate
 
 **Geometry**

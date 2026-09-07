@@ -36,7 +36,7 @@ class VoxelSettings:
     alpha_threshold: int = 96            # texture alpha below this = empty
     cutout_dilation: int = 1             # grow opaque texture areas by this many texels (thin stems/wires stay printable)
     solid_textures: tuple[str, ...] = ("glass", "tinted_glass", "ice", "frosted_ice", "slime", "honey", "water", "lava", "leaves")
-    translucent_textures: tuple[str, ...] = ("glass", "ice", "honey_block", "slime_block", "water", "portal")   # kept as their own 'clear filament' color
+    translucent_textures: tuple[str, ...] = ("glass", "ice", "honey_block", "slime_block", "water", "nether_portal")   # kept as their own 'clear filament' color
     translucent_as_solid: bool = True    # textures with many semi-transparent pixels are treated as opaque (stained glass, ice)
     include_fluids: bool = False
     unknown_policy: str = "cube"         # 'cube' | 'skip'
@@ -530,7 +530,30 @@ class BlockVoxelizer:
             out[inside] = self.colors.index_of_color(rgb)
 
     # ---- fallbacks & fluids -------------------------------------------------------------
+    def _entity_block(self, state: BlockState) -> Optional[BlockPattern]:
+        """Chests, beds, shulker boxes and heads stamped from the game's own ModelPart geometry."""
+        try:
+            from ..mobs.entity_blocks import entity_block
+            from ..mobs.raster import MobPlacement, MobVoxelizer
+        except ImportError:  # pragma: no cover
+            return None
+        spec = entity_block(state)
+        if spec is None:
+            return None
+        mv = MobVoxelizer(self, min_units=self.settings.min_thickness, alpha_threshold=self.settings.alpha_threshold)
+        raster = mv.rasterize(MobPlacement(spec.model, 0.0, 0.0, 0.0, 0.0, transform=(spec.A, spec.b)))
+        pat = raster.cells.get((0, 0, 0))
+        if pat is None or mv.missing:
+            return None
+        pat.kind = "fallback"
+        pat.note = spec.note
+        self.fallback_states[str(state)] = spec.note
+        return pat
+
     def _fallback(self, state: BlockState, particle: Optional[str], reason: str) -> BlockPattern:
+        eb = self._entity_block(state)
+        if eb is not None:
+            return eb
         shape = fallback_for(state, particle, reason)
         n = self.settings.resolution
         out = np.zeros(n * n * n, dtype=np.uint16)

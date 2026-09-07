@@ -166,7 +166,7 @@ class Converter:
                              cutout_dilation=s.cutout_dilation, solid_textures=tuple(s.solid_textures),
                              translucent_as_solid=s.translucent_as_solid, include_fluids=s.include_fluids,
                              unknown_policy=s.unknown_policy, relief_depth=s.relief_units(block_mm), relief_mode=s.relief_mode,
-                             translucent_textures=("glass", "ice", "honey_block", "slime_block", "water", "portal") if s.separate_glass else ())
+                             translucent_textures=("glass", "ice", "honey_block", "slime_block", "water", "nether_portal") if s.separate_glass else ())
 
     def kit_settings(self, block_mm: float):
         from .kit import KitSettings

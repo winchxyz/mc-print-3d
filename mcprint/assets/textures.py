@@ -1,6 +1,8 @@
 """Texture loading (PNG -> RGBA numpy), animation handling, average colors."""
 from __future__ import annotations
 
+import math
+
 import io
 import json
 import logging
@@ -283,6 +285,8 @@ class TextureLoader:
                 return None
             if _connectivity(recessed) < 0.6 or _line_likeness(recessed) < 0.6:
                 return None
+            if _elongation(recessed) < 1.6:      # compact specks (end stone, glowstone) are shading, not grooves
+                return None
         else:
             if not (0.02 <= frac <= 0.6) or strength < 0.04:
                 return None
@@ -318,6 +322,40 @@ def _connectivity(mask: np.ndarray) -> float:
             if dy or dx:
                 nb += np.roll(np.roll(mask, dy, axis=0), dx, axis=1)
     return float((nb[mask] >= 2).mean()) if mask.any() else 0.0
+
+
+def _elongation(mask: np.ndarray) -> float:
+    """Texel-weighted mean of (bounding-box extent / sqrt(size)) over the 8-connected components of
+    ``mask`` (tiled 2x2 so wrap-around pieces are measured whole).  Straight grooves score well above 2,
+    isolated specks about 1."""
+    big = np.tile(mask.astype(bool), (2, 2))
+    H, W = big.shape
+    seen = np.zeros_like(big)
+    total = 0
+    acc = 0.0
+    ys_all, xs_all = np.nonzero(big)
+    for y0, x0 in zip(ys_all.tolist(), xs_all.tolist()):
+        if seen[y0, x0]:
+            continue
+        stack = [(y0, x0)]
+        seen[y0, x0] = True
+        ys = []
+        xs = []
+        while stack:
+            y, x = stack.pop()
+            ys.append(y)
+            xs.append(x)
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    ny, nx = y + dy, x + dx
+                    if 0 <= ny < H and 0 <= nx < W and big[ny, nx] and not seen[ny, nx]:
+                        seen[ny, nx] = True
+                        stack.append((ny, nx))
+        n = len(ys)
+        ext = max(max(ys) - min(ys) + 1, max(xs) - min(xs) + 1)
+        acc += n * (ext / math.sqrt(n))
+        total += n
+    return acc / total if total else 0.0
 
 
 def _line_likeness(mask: np.ndarray) -> float:
